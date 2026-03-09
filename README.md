@@ -6,6 +6,7 @@ A multi-channel AI gateway that routes messages between messaging channels (What
 
 ## Why Open-Nipper
 
+- **Local AI First:** Designed to run within the constraints of Local AI.
 - **Decoupled by design:** Gateway and agents communicate over a queue (RabbitMQ), so you can scale, restart, or deploy them independently.
 - **Kubernetes-friendly:** Gateway and agent can run on Kubernetes; the agent needs no sandbox for basic operation.
 - **Lightweight:** Single binary for both gateway and agent; no heavy runtime.
@@ -13,6 +14,7 @@ A multi-channel AI gateway that routes messages between messaging channels (What
 - **Proven WhatsApp stack:** Uses [Wuzapi](https://github.com/asternic/wuzapi) for WhatsApp; the gateway is decoupled from the messaging network.
 - **Sandboxed agent:** With sandbox enabled, the agent runs in containers; you can drop all capabilities if you want.
 - **Container and sandbox:** The agent can run in a container; enabling the sandbox requires mounting the container runtime socket. Kubernetes pod sandbox is in the works.
+- **Support for Speech Recognition:** The agent can recognize speech and use it as a prompt, voice cloning and responses are next.
 
 ## Architecture
 
