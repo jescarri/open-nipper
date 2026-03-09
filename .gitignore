@@ -1,0 +1,23 @@
+# Binaries
+bin/
+
+# Coverage reports
+coverage/
+*.out
+*.html
+
+# Go cache
+go.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local editor/IDE config (may contain paths and PII)
+.claude/

@@ -1,0 +1,160 @@
+---
+# Open-Nipper Agent Configuration
+#
+# NOTE: RabbitMQ config is NOT here.
+# It comes automatically from Gateway auto-registration.
+#
+# Minimal startup (env vars only, no config file needed):
+#   NIPPER_GATEWAY_URL=http://gateway:18789 \
+#   NIPPER_AUTH_TOKEN=npr_... \
+#   OPENAI_API_KEY=sk-... \
+#   nipper agent
+#
+# With this config file:
+#   NIPPER_GATEWAY_URL=http://gateway:18789 \
+#   NIPPER_AUTH_TOKEN=npr_... \
+#   nipper agent --config agent.yaml
+
+agent:
+  base_path: "~/.open-nipper"
+
+  # Inference provider configuration.
+  #
+  # Supported providers:
+  #   "openai"  — OpenAI API (api_key required, base_url optional for Azure/proxy)
+  #   "local"   — LM Studio, vLLM, LocalAI, TGI (base_url required, api_key optional)
+  #               Aliases: "lmstudio", "vllm", "localai"
+  #   "ollama"  — Ollama native API only (uses /api/chat, NOT OpenAI-compatible)
+  #
+  # Examples:
+  #   OpenAI:    provider: "openai",  model: "gpt-4o",   api_key: "${OPENAI_API_KEY}"
+  #   LM Studio: provider: "local",   model: "my-model", base_url: "http://localhost:1234/v1"
+  #   Ollama:    provider: "ollama",  model: "llama3",   base_url: "http://localhost:11434"
+  inference:
+    provider: "local" # "openai" | "local" | "ollama"
+    model: "Qwen3-Next-80B-A3B-Instruct-UD-Q8_K_XL-00001-of-00002.gguf"
+    api_key: "${OPENAI_API_KEY}" # required for openai; optional for local/ollama
+    base_url: "http://localhost:1234/v1" # empty = api.openai.com; set for local/LLM Studio
+    temperature: 0.01
+    frequency_penalty: 0.3 # 0.0–2.0; penalises repeated tokens to prevent degenerate loops (e.g. "* * *" filling)
+    max_tokens: 0 # 0 = auto (server decides based on remaining context); set >0 to cap output length explicitly
+    stream_generate: true # use streaming for Generate calls (workaround for vLLM non-streaming tool call bug)
+    timeout_seconds: 300 # hard deadline for each LLM call (default 120); increase for slow/thinking models
+
+  max_steps: 25
+
+  prompt:
+    system_prompt: "You are a helpful assistant."
+    compaction_level: "auto" # auto|full|standard|compact|minimal
+
+  tools:
+    web_fetch: true
+    web_search: true
+    bash: true
+    doc_fetcher: true
+    memory: true
+    weather: true # Environment Canada weather (current conditions + forecast)
+    cron: true # list/add/remove scheduled cron jobs (prompts) via cron_list_jobs, cron_add_job, cron_remove_job
+    # Search engine: exactly one of google or duck_duck_go must be enabled (mutually exclusive).
+    web_search_config:
+      google:
+        enabled: false
+        google_api_key: "${GOOGLE_SEARCH_API_KEY}"
+        google_cx: "${GOOGLE_SEARCH_CX}" # Custom Search Engine ID
+      duck_duck_go:
+        enabled: true # default; set false and google.enabled: true to use Google Custom Search
+
+  # Durable memory: agents save notes/facts across sessions.
+  # Memory files stored at {base_path}/users/{userId}/memory/YYYY-MM-DD.md
+  memory:
+    max_days: 7 # days of memory to inject into system prompt
+    max_tokens: 4000 # max bytes of memory context
+
+  # S3/Minio config for doc_fetch tool. Used to fetch WhatsApp media and other S3 objects.
+  # Credentials resolved from env vars at startup (${VAR} syntax).
+  s3:
+    endpoint: "${MINIO_ENDPOINT}" # e.g. "minio.example.com:9000" or "https://minio.example.com"
+    bucket: "${MINIO_BUCKET}" # default bucket (can be overridden in s3:// URIs)
+    access_key: "${MINIO_ACCESS_KEY}"
+    secret_key: "${MINIO_SECRET_KEY}"
+    region: "us-west-2"
+    use_ssl: true
+
+  # Media enrichment: pre-process audio/image content before the LLM sees it.
+  # Speech enrichment transcribes voice notes so the agent sees them as text.
+  media_enrichment:
+    speech:
+      enabled: true
+      endpoint: "https://speech.example.com" # whisper.cpp server URL
+      timeout_seconds: 60
+
+  sandbox:
+    enabled: true
+    image: "yt-dlp:latest"
+    work_dir: "/workspace"
+    memory_limit_mb: 2048
+    cpu_limit: 2.0
+    timeout_seconds: 120
+    network_enabled: true
+    read_only: false
+    volume_mounts: {}
+    env: ["DEBIAN_FRONTEND=noninteractive"]
+
+  # Skills (plugins): load SKILL.md + optional config from a directory; inject into system prompt.
+  # Script-based skills run via skill_exec or bash; MCP-only skills (config type: mcp) use MCP tools directly.
+  skills:
+    enabled: true # set true to load skills (e.g. ~/.open-nipper/skills/plant-care/)
+    path: "" # default: {base_path}/skills; or set full path to skills directory
+
+  # MCP (Model Context Protocol) servers — extend the agent with external tools.
+  # Each entry connects to an MCP server via SSE or STDIO transport.
+  # All fields support ${ENV_VAR} syntax for secret injection.
+  #
+  # SSE example (remote server with auth headers):
+  mcp:
+    - name: "HomeAssistant"
+      transport: "sse"
+      url: "https://hass.example.com/mcp_server/sse"
+      headers:
+        Authorization: "Bearer ${HOMEASSISTANT_MCP_AUTH_TOKEN}"
+      keep_alive_seconds: 30 # SSE keepalive ping interval (default 30s); triggers auto-reconnect on failure
+    - name: "joplin"
+      transport: "sse"
+      url: "http://localhost:41184/mcp"
+      headers:
+        Authorization: "Bearer ${GOJOPLIN_TOKEN}"
+      keep_alive_seconds: 30 # SSE keepalive ping interval (default 30s); triggers auto-reconnect on failure
+  #
+  # STDIO example (local subprocess):
+  #   mcp:
+  #     - name: "github"
+  #       transport: "stdio"
+  #       command: "npx"
+  #       args: ["-y", "@modelcontextprotocol/server-github"]
+  #       env: ["GITHUB_TOKEN=${GITHUB_TOKEN}"]
+  #
+  #     - name: "filesystem"
+  #       transport: "stdio"
+  #       command: "npx"
+  #       args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+  #
+  # See MCP_NEXT_STEPS.md for OAuth2 integration guidance.
+
+  secrets:
+    env_map: {}
+
+# Telemetry is optional and independent of the Gateway's telemetry config.
+telemetry:
+  tracing:
+    enabled: true
+    exporter: "otlp"
+    # Use "http" when the collector speaks OTLP over HTTP (POST /v1/traces).
+    # Use "grpc" when the collector speaks gRPC. If you see "frame header looked like HTTP/1.1" → set "http".
+    protocol: "http"
+    endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+    service_name: "niper-agent"
+    sample_rate: 1.0
+  metrics:
+    enabled: true
+    exporter: "prometheus"
+    prometheus_port: 9091

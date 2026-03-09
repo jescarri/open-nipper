@@ -1,0 +1,173 @@
+---
+gateway:
+  bind: "0.0.0.0"
+  port: 18789
+  # Externally-reachable URL for this gateway, used when registering webhook
+  # callbacks with remote services (e.g. Wuzapi, Slack).
+  # Falls back to http://{bind}:{port} when empty.
+  # Example: https://nipper.example.com or http://localhost:18789
+  base_url: "http://localhost:18789"
+  read_timeout_seconds: 30
+  write_timeout_seconds: 30
+  admin:
+    enabled: true
+    bind: "127.0.0.1"
+    port: 18790
+    auth:
+      enabled: false
+      token: "${ADMIN_API_TOKEN}"
+
+channels:
+  whatsapp:
+    enabled: true
+    config:
+      wuzapi_base_url: "https://wuzapi.example.com"
+      wuzapi_token: "${WUZAPI_USER_TOKEN}"
+      wuzapi_hmac_key: "${WUZAPI_HMAC_KEY}"
+      wuzapi_instance_name: "Mr Robot"
+      webhook_path: "/webhook/whatsapp"
+      events: ["Message"]
+      delivery:
+        mark_as_read: true
+        show_typing: true
+        quote_original: true
+      s3:
+        endpoint: "${MINIO_ENDPOINT}"
+        bucket: "${MINIO_BUCKET}"
+        access_key: "${MINIO_ACCESS_KEY}"
+        secret_key: "${MINIO_SECRET_KEY}"
+        region: "us-east-1"
+        use_ssl: true
+
+  slack:
+    enabled: false
+    config:
+      app_token: "${SLACK_APP_TOKEN}"
+      bot_token: "${SLACK_BOT_TOKEN}"
+      signing_secret: "${SLACK_SIGNING_SECRET}"
+      webhook_path: "/webhook/slack"
+
+  cron:
+    enabled: true
+    jobs: []
+
+  mqtt:
+    enabled: false
+    config:
+      broker: "mqtt://localhost:1883"
+      client_id: "open-nipper-gateway"
+      username: "${MQTT_USERNAME}"
+      password: "${MQTT_PASSWORD}"
+      topic_prefix: "nipper"
+      qos: 1
+      clean_session: false
+      keep_alive: 60
+      reconnect:
+        enabled: true
+        initial_delay_ms: 1000
+        max_delay_ms: 30000
+
+  rabbitmq_channel:
+    enabled: false
+    config:
+      url: "amqps://rabbitmq.example.com:5671"
+      username: "${RABBITMQ_USERNAME}"
+      password: "${RABBITMQ_PASSWORD}"
+      vhost: "/nipper"
+      exchange_inbound: "nipper.inbound"
+      exchange_outbound: "nipper.outbound"
+      exchange_dlx: "nipper.dlx"
+      prefetch: 1
+      heartbeat: 60
+      reconnect:
+        enabled: true
+        initial_delay_ms: 1000
+        max_delay_ms: 30000
+
+queue:
+  transport: "rabbitmq"
+  rabbitmq:
+    url: "amqps://rabbitmq.example.com:5671"
+    username: "${RABBITMQ_USERNAME}"
+    password: "${RABBITMQ_PASSWORD}"
+    vhost: "/nipper"
+    heartbeat: 60
+    reconnect:
+      enabled: true
+      initial_delay_ms: 1000
+      max_delay_ms: 30000
+  default_mode: "steer"
+  per_channel:
+    whatsapp:
+      mode: "collect"
+      debounce_ms: 2000
+      collect_cap: 5
+    slack:
+      mode: "steer"
+      debounce_ms: 500
+    cron:
+      mode: "queue"
+      priority: -1
+    mqtt:
+      mode: "queue"
+    rabbitmq:
+      mode: "queue"
+
+agents:
+  health_check_interval_seconds: 30
+  consumer_timeout_seconds: 60
+  registration:
+    enabled: true
+    rate_limit: 10
+    token_rotation_on_register: true
+  rabbitmq_management:
+    url: "https://rabbitmq.example.com:15671"
+    username: "${RABBITMQ_MGMT_USERNAME}"
+    password: "${RABBITMQ_MGMT_PASSWORD}"
+
+observability:
+  enabled: true
+  sanitizer:
+    pii_redaction: true
+    credential_detection: true
+    secret_scrubbing: true
+
+security:
+  rate_limit:
+    per_user:
+      messages_per_minute: 20
+      messages_per_hour: 200
+  tools:
+    policy:
+      # allow: leave empty to permit all agent tools (web_fetch, bash, cron_list_jobs, etc.)
+      # add specific tool names here only if you want a strict allowlist.
+      # Cron tools (when agent tools.cron is enabled): cron_list_jobs, cron_add_job, cron_remove_job
+      allow: []
+      deny: []
+
+datastore:
+  path: "~/.open-nipper/nipper.db"
+  wal_mode: true
+  busy_timeout_ms: 5000
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+    retention_days: 30
+    path: "~/.open-nipper/backups/"
+
+telemetry:
+  tracing:
+    enabled: true
+    exporter: "otlp" # "otlp" | "stdout" | "none"
+    endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+    service_name: "nipper-gateway"
+    # Match what your collector expects: "http" (POST /v1/traces) or "grpc".
+    # If you see "malformed HTTP response" with \x00 in logs, the receiver is gRPC — use "grpc".
+    # Gateway and agent can differ if they hit different receivers (e.g. proxy vs direct).
+    protocol: "http" # "http" | "grpc"
+    sample_rate: 1.0
+  metrics:
+    enabled: true # when true and exporter "prometheus", GET /metrics is exposed on the main gateway server (not logged or traced)
+    exporter: "prometheus" # "prometheus" | "otlp" | "none"
+    prometheus_port: 9090 # used only by agent; gateway serves /metrics on the main port
+    endpoint: "${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT}"
