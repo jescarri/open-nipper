@@ -4,15 +4,15 @@ A multi-channel AI gateway that routes messages between messaging channels (What
 
 ![Open-Nipper](open-nipper.png)
 
-**Why Open-Nipper**
+## Why Open-Nipper
 
-- **Decoupled by design** — Gateway and agents communicate over a queue (RabbitMQ), so you can scale, restart, or deploy them independently.
-- **Kubernetes-friendly** — Gateway and agent run on Kubernetes; the agent needs no sandbox for basic operation.
-- **Lightweight** — Single binary for both gateway and agent; no heavy runtime.
-- **Skills and MCP** — Supports skills and local or remote MCP (SSE or STDIO); we favour SSE for remote tools.
-- **Proven WhatsApp stack** — Uses [Wuzapi](https://github.com/asternic/wuzapi) for WhatsApp; the gateway is decoupled from the messaging network.
-- **Sandboxed agent** — With sandbox enabled, the agent runs in containers; you can drop all capabilities if you want.
-- **Container and sandbox** — The agent can run in a container; enabling the sandbox requires mounting the container runtime socket. Kubernetes pod sandbox is in the works.
+- **Decoupled by design:** Gateway and agents communicate over a queue (RabbitMQ), so you can scale, restart, or deploy them independently.
+- **Kubernetes-friendly:** Gateway and agent can run on Kubernetes; the agent needs no sandbox for basic operation.
+- **Lightweight:** Single binary for both gateway and agent; no heavy runtime.
+- **Skills and MCP:** Supports skills and local or remote MCP (SSE or STDIO); we favour SSE for remote tools.
+- **Proven WhatsApp stack:** Uses [Wuzapi](https://github.com/asternic/wuzapi) for WhatsApp; the gateway is decoupled from the messaging network.
+- **Sandboxed agent:** With sandbox enabled, the agent runs in containers; you can drop all capabilities if you want.
+- **Container and sandbox:** The agent can run in a container; enabling the sandbox requires mounting the container runtime socket. Kubernetes pod sandbox is in the works.
 
 ## Architecture
 
