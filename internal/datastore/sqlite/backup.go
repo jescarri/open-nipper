@@ -47,7 +47,7 @@ func (s *Store) Backup(ctx context.Context, destPath string) error {
 			if err != nil {
 				return fmt.Errorf("backup: init sqlite3_backup: %w", err)
 			}
-			defer bk.Finish()
+			defer func() { _ = bk.Finish() }()
 
 			for {
 				select {

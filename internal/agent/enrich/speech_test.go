@@ -66,7 +66,7 @@ func TestSpeechEnricher_Enrich_Success(t *testing.T) {
 
 		resp := whisperResponse{Text: " Hello, what is the weather in Buenos Aires? "}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -93,7 +93,7 @@ func TestSpeechEnricher_Enrich_Success(t *testing.T) {
 func TestSpeechEnricher_Enrich_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"internal error"}`))
+		_, _ = w.Write([]byte(`{"error":"internal error"}`))
 	}))
 	defer server.Close()
 
@@ -129,7 +129,7 @@ func TestSpeechEnricher_Enrich_EmptyURL(t *testing.T) {
 func TestSpeechEnricher_Enrich_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`not json`))
+		_, _ = w.Write([]byte(`not json`))
 	}))
 	defer server.Close()
 
@@ -150,7 +150,7 @@ func TestSpeechEnricher_Enrich_InvalidJSON(t *testing.T) {
 func TestSpeechEnricher_Enrich_EmptyTranscript(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(whisperResponse{Text: "   "})
+		_ = json.NewEncoder(w).Encode(whisperResponse{Text: "   "})
 	}))
 	defer server.Close()
 
@@ -176,7 +176,7 @@ func TestSpeechEnricher_Enrich_UsesS3Fetcher_ForHTTPURL(t *testing.T) {
 	// We set up a plain HTTP server and configure S3 endpoint to NOT match,
 	// so the fetcher falls back to HTTP GET.
 	audioServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("audio-bytes-from-http"))
+		_, _ = w.Write([]byte("audio-bytes-from-http"))
 	}))
 	defer audioServer.Close()
 
@@ -186,7 +186,7 @@ func TestSpeechEnricher_Enrich_UsesS3Fetcher_ForHTTPURL(t *testing.T) {
 			t.Errorf("expected audio bytes from HTTP, got different content")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(whisperResponse{Text: "transcribed"})
+		_ = json.NewEncoder(w).Encode(whisperResponse{Text: "transcribed"})
 	}))
 	defer whisperServer.Close()
 

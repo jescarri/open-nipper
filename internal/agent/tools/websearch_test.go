@@ -35,7 +35,7 @@ func TestWebSearch_DDG_ParsesResults(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fakeDDGHTML))
+		_, _ = w.Write([]byte(fakeDDGHTML))
 	}))
 	defer srv.Close()
 
@@ -81,7 +81,7 @@ func TestWebSearch_DDG_DefaultEngine(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fakeDDGHTML))
+		_, _ = w.Write([]byte(fakeDDGHTML))
 	}))
 	defer srv.Close()
 
@@ -102,7 +102,7 @@ func TestWebSearch_DDG_MaxResultsCapped(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fakeDDGHTMLManyResults))
+		_, _ = w.Write([]byte(fakeDDGHTMLManyResults))
 	}))
 	defer srv.Close()
 
@@ -123,7 +123,7 @@ func TestWebSearch_DDG_MaxResultsCapped(t *testing.T) {
 func TestWebSearch_DDG_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Internal Server Error"))
+		_, _ = w.Write([]byte("Internal Server Error"))
 	}))
 	defer srv.Close()
 
@@ -177,7 +177,7 @@ func TestWebSearch_Google_ParsesResults(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(fakeGoogleResponse)
+		_ = json.NewEncoder(w).Encode(fakeGoogleResponse)
 	}))
 	defer srv.Close()
 
@@ -225,7 +225,7 @@ func TestWebSearch_Google_ErrorsWhenNoCredentials(t *testing.T) {
 func TestWebSearch_Google_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"error":{"message":"API key invalid"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"API key invalid"}}`))
 	}))
 	defer srv.Close()
 
@@ -272,7 +272,7 @@ func TestWebSearch_UnknownEngineUsesConfiguredEngine(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fakeDDGHTML))
+		_, _ = w.Write([]byte(fakeDDGHTML))
 	}))
 	defer srv.Close()
 
@@ -293,7 +293,7 @@ func TestWebSearch_DefaultMaxResults(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fakeDDGHTMLManyResults))
+		_, _ = w.Write([]byte(fakeDDGHTMLManyResults))
 	}))
 	defer srv.Close()
 
@@ -317,7 +317,7 @@ func TestWebSearch_MaxResultsClamped(t *testing.T) {
 			t.Errorf("expected num=10 (clamped from 50), got %q", num)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(fakeGoogleResponse)
+		_ = json.NewEncoder(w).Encode(fakeGoogleResponse)
 	}))
 	defer srv.Close()
 
@@ -506,7 +506,7 @@ func TestWebSearch_DDG_WithRedirectURLs(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(html))
+		_, _ = w.Write([]byte(html))
 	}))
 	defer srv.Close()
 

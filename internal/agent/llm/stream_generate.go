@@ -23,7 +23,7 @@ type StreamingGenerateModel struct {
 	inner model.ToolCallingChatModel
 }
 
-var _ model.ChatModel = (*StreamingGenerateModel)(nil)
+var _ model.ChatModel = (*StreamingGenerateModel)(nil)             //nolint:staticcheck // SA1019: ChatModel deprecated; we implement both for compatibility
 var _ model.ToolCallingChatModel = (*StreamingGenerateModel)(nil)
 
 // NewStreamingGenerateModel wraps a ToolCallingChatModel so that Generate

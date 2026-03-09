@@ -260,15 +260,7 @@ func TestBashToolDeniedByPolicy(t *testing.T) {
 		Tools:   config.AgentToolsConfig{Bash: true},
 		Sandbox: config.SandboxConfig{TimeoutSeconds: 120},
 	}
-	// Import the registration type through the tools package's BuildTools signature
-	// by using the deny policy inline.
-	type ToolsPolicy struct {
-		Allow []string `json:"allow"`
-		Deny  []string `json:"deny"`
-	}
-	// The actual type is registration.ToolsPolicy, but we test through the registry import.
-	// For this test we rely on the tools package's isAllowed logic.
-	// We can test indirectly by verifying 0 tools returned when bash is denied via "*".
+	// BuildTools with nil policy; we verify tool count for bash+get_datetime.
 	builtTools, err := tools.BuildTools(ctx, cfg, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

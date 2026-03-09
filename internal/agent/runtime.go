@@ -138,7 +138,7 @@ func toolNameFromNotFoundError(err error) string {
 type Runtime struct {
 	cfg       *config.AgentRuntimeConfig
 	reg       *registration.RegistrationResult
-	chatModel model.ChatModel
+	chatModel model.ChatModel //nolint:staticcheck // SA1019: ChatModel deprecated in favor of ToolCallingChatModel; we support both
 	tools     []einotool.BaseTool
 	sessions  session.SessionStore
 	logger    *zap.Logger
@@ -164,7 +164,7 @@ type Runtime struct {
 func NewRuntime(
 	cfg *config.AgentRuntimeConfig,
 	reg *registration.RegistrationResult,
-	chatModel model.ChatModel,
+	chatModel model.ChatModel, //nolint:staticcheck // SA1019: ChatModel deprecated; we accept both ChatModel and ToolCallingChatModel
 	tools []einotool.BaseTool,
 	sessions session.SessionStore,
 	logger *zap.Logger,
@@ -636,14 +636,14 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 			Tools: wrapToolsWithDedup(sanitizeToolDescriptions(r.currentTools())),
 		},
 		MaxStep:         r.cfg.MaxSteps,
-		MessageModifier: react.NewPersonaModifier(systemPrompt),
+		MessageModifier: react.NewPersonaModifier(systemPrompt), //nolint:staticcheck // SA1019: deprecated; prefer persona in input
 	}
 
 	// Try to use ToolCallingModel if supported, fall back to Model.
 	if tcm, ok := r.chatModel.(model.ToolCallingChatModel); ok {
 		agentCfg.ToolCallingModel = tcm
 	} else {
-		agentCfg.Model = r.chatModel
+		agentCfg.Model = r.chatModel //nolint:staticcheck // SA1019: Model deprecated in favor of ToolCallingModel
 	}
 
 	reactAgent, err := react.NewAgent(ctx, agentCfg)
@@ -747,7 +747,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 					)
 					recoveryHint := fmt.Sprintf("\n\n[RECOVERY: You called a tool named %q; that tool does not exist. For URL summarization use web_fetch(url), then list_folders, then create_note. Do not call %q as a tool.]", toolName, toolName)
 					origModifier := agentCfg.MessageModifier
-					agentCfg.MessageModifier = react.NewPersonaModifier(systemPrompt+recoveryHint)
+					agentCfg.MessageModifier = react.NewPersonaModifier(systemPrompt+recoveryHint) //nolint:staticcheck // SA1019: deprecated
 					if newAgent, agentErr := react.NewAgent(ctx, agentCfg); agentErr == nil {
 						reactAgent = newAgent
 						agentCfg.MessageModifier = origModifier

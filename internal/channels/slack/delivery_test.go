@@ -44,10 +44,10 @@ func TestDeliverResponse_PostMessage(t *testing.T) {
 		capturedMethod = parts[len(parts)-1]
 
 		var payload map[string]any
-		json.NewDecoder(r.Body).Decode(&payload)
+		_ = json.NewDecoder(r.Body).Decode(&payload)
 		capturedPayload = payload
 
-		w.Write(slackResponse(true, "1234.5678", ""))
+		_, _ = w.Write(slackResponse(true, "1234.5678", ""))
 	}))
 	defer srv.Close()
 
@@ -109,7 +109,7 @@ func TestDeliverResponse_UpdateExistingStreamMessage(t *testing.T) {
 		defer mu.Unlock()
 		parts := strings.Split(r.URL.Path, "/")
 		capturedMethod = parts[len(parts)-1]
-		w.Write(slackResponse(true, "1234.5678", ""))
+		_, _ = w.Write(slackResponse(true, "1234.5678", ""))
 	}))
 	defer srv.Close()
 
@@ -186,7 +186,7 @@ func TestDeliverEvent_Delta_CreatesNewMessage(t *testing.T) {
 		defer mu.Unlock()
 		parts := strings.Split(r.URL.Path, "/")
 		capturedMethod = parts[len(parts)-1]
-		w.Write(slackResponse(true, "new.msg.ts", ""))
+		_, _ = w.Write(slackResponse(true, "new.msg.ts", ""))
 	}))
 	defer srv.Close()
 
@@ -227,7 +227,7 @@ func TestDeliverEvent_Delta_UpdatesExisting(t *testing.T) {
 		defer mu.Unlock()
 		parts := strings.Split(r.URL.Path, "/")
 		capturedMethod = parts[len(parts)-1]
-		w.Write(slackResponse(true, "", ""))
+		_, _ = w.Write(slackResponse(true, "", ""))
 	}))
 	defer srv.Close()
 
@@ -264,7 +264,7 @@ func TestAuthTest_Success(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer xoxb-test" {
 			t.Errorf("auth header = %q", r.Header.Get("Authorization"))
 		}
-		w.Write(slackResponse(true, "", ""))
+		_, _ = w.Write(slackResponse(true, "", ""))
 	}))
 	defer srv.Close()
 
@@ -282,7 +282,7 @@ func TestAuthTest_Success(t *testing.T) {
 
 func TestAuthTest_Failure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(slackResponse(false, "", "invalid_auth"))
+		_, _ = w.Write(slackResponse(false, "", "invalid_auth"))
 	}))
 	defer srv.Close()
 
@@ -302,8 +302,8 @@ func TestAddReaction(t *testing.T) {
 	var capturedPayload map[string]any
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&capturedPayload)
-		w.Write(slackResponse(true, "", ""))
+		_ = json.NewDecoder(r.Body).Decode(&capturedPayload)
+		_, _ = w.Write(slackResponse(true, "", ""))
 	}))
 	defer srv.Close()
 
@@ -324,7 +324,7 @@ func TestAddReaction(t *testing.T) {
 
 func TestAddReaction_AlreadyReacted(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(slackResponse(false, "", "already_reacted"))
+		_, _ = w.Write(slackResponse(false, "", "already_reacted"))
 	}))
 	defer srv.Close()
 

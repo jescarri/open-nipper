@@ -100,14 +100,14 @@ func TestDispatcher_BufferedDeltaThenDone(t *testing.T) {
 	ctx := context.Background()
 
 	// Send deltas
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeDelta,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
 		UserID:     "u1",
 		Delta:      &models.EventDelta{Text: "Hello "},
 	})
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeDelta,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -116,7 +116,7 @@ func TestDispatcher_BufferedDeltaThenDone(t *testing.T) {
 	})
 
 	// Send done
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -145,7 +145,7 @@ func TestDispatcher_StreamingForwardsEvents(t *testing.T) {
 
 	ctx := context.Background()
 
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeDelta,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -153,7 +153,7 @@ func TestDispatcher_StreamingForwardsEvents(t *testing.T) {
 		Delta:      &models.EventDelta{Text: "streaming..."},
 	})
 
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -182,7 +182,7 @@ func TestDispatcher_ErrorEvent(t *testing.T) {
 
 	ctx := context.Background()
 
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeError,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -251,7 +251,7 @@ func TestDispatcher_BroadcastDelivery(t *testing.T) {
 		NotifyChannels: []string{"whatsapp:1555010001@s.whatsapp.net", "slack:C0789GHI"},
 	}, nil, nil)
 
-	d.HandleEvent(context.Background(), &models.NipperEvent{
+	_ = d.HandleEvent(context.Background(), &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -284,7 +284,7 @@ func TestDispatcher_WebSocketFanOut(t *testing.T) {
 	ch := make(chan *models.NipperEvent, 10)
 	d.SubscribeWebSocket(sessionKey, ch)
 
-	d.HandleEvent(context.Background(), &models.NipperEvent{
+	_ = d.HandleEvent(context.Background(), &models.NipperEvent{
 		Type:       models.EventTypeDelta,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -314,7 +314,7 @@ func TestDispatcher_DoneRemovesRegistry(t *testing.T) {
 	sessionKey := "user:u1:channel:whatsapp:session:s1"
 	registerSession(reg, sessionKey, models.ChannelTypeWhatsApp, false)
 
-	d.HandleEvent(context.Background(), &models.NipperEvent{
+	_ = d.HandleEvent(context.Background(), &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -343,7 +343,7 @@ func TestDispatcher_QueuedMessagesEachGetDelivery(t *testing.T) {
 
 	// Send 3 done events (agent processed 3 messages)
 	for i := 0; i < 3; i++ {
-		d.HandleEvent(ctx, &models.NipperEvent{
+		_ = d.HandleEvent(ctx, &models.NipperEvent{
 			Type:       models.EventTypeDone,
 			SessionKey: sessionKey,
 			ResponseID: fmt.Sprintf("resp-%d", i+1),
@@ -385,7 +385,7 @@ func TestDispatcher_WhatsAppDoneIncludesInboundImagePart(t *testing.T) {
 		},
 	)
 
-	d.HandleEvent(context.Background(), &models.NipperEvent{
+	_ = d.HandleEvent(context.Background(), &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-image",
@@ -420,7 +420,7 @@ func TestDispatcher_AccumulatorClearedOnDone(t *testing.T) {
 	registerSession(reg, sessionKey, models.ChannelTypeWhatsApp, false)
 
 	ctx := context.Background()
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeDelta,
 		SessionKey: sessionKey,
 		Delta:      &models.EventDelta{Text: "data"},
@@ -434,7 +434,7 @@ func TestDispatcher_AccumulatorClearedOnDone(t *testing.T) {
 	}
 	d.accMu.Unlock()
 
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-1",
@@ -469,7 +469,7 @@ func TestDispatcher_DeliveryRetryOnError(t *testing.T) {
 	sessionKey := "user:u1:channel:whatsapp:session:retry"
 	registerSession(reg, sessionKey, models.ChannelTypeWhatsApp, false)
 
-	d.HandleEvent(context.Background(), &models.NipperEvent{
+	_ = d.HandleEvent(context.Background(), &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-retry",
@@ -500,7 +500,7 @@ func TestDispatcher_DeliveryRetryAllFail(t *testing.T) {
 	sessionKey := "user:u1:channel:whatsapp:session:allfail"
 	registerSession(reg, sessionKey, models.ChannelTypeWhatsApp, false)
 
-	d.HandleEvent(context.Background(), &models.NipperEvent{
+	_ = d.HandleEvent(context.Background(), &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-fail",
@@ -534,7 +534,7 @@ func TestDispatcher_DeliveryRetryContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	d.HandleEvent(ctx, &models.NipperEvent{
+	_ = d.HandleEvent(ctx, &models.NipperEvent{
 		Type:       models.EventTypeDone,
 		SessionKey: sessionKey,
 		ResponseID: "resp-cancel",

@@ -31,7 +31,7 @@ func newTestWuzapi(t *testing.T) (*WuzapiClient, *httptest.Server, *[]requestLog
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var parsed map[string]any
-		json.Unmarshal(body, &parsed)
+		_ = json.Unmarshal(body, &parsed)
 
 		mu.Lock()
 		logs = append(logs, requestLog{
@@ -43,7 +43,7 @@ func newTestWuzapi(t *testing.T) (*WuzapiClient, *httptest.Server, *[]requestLog
 		mu.Unlock()
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 
 	client := NewWuzapiClient(srv.URL, "test-token", config.DeliveryOptions{
@@ -118,7 +118,7 @@ func TestDelivery_QuotesOriginalMessage(t *testing.T) {
 	client, srv, logs := newTestWuzapi(t)
 	defer srv.Close()
 
-	client.DeliverResponse(context.Background(), testResponse())
+	_ = client.DeliverResponse(context.Background(), testResponse())
 
 	textReq := (*logs)[1] // send/text
 	ci, ok := textReq.Body["ContextInfo"]
@@ -138,7 +138,7 @@ func TestDelivery_SendsAuthToken(t *testing.T) {
 	client, srv, logs := newTestWuzapi(t)
 	defer srv.Close()
 
-	client.DeliverResponse(context.Background(), testResponse())
+	_ = client.DeliverResponse(context.Background(), testResponse())
 
 	for _, l := range *logs {
 		if l.Token != "test-token" {
@@ -152,7 +152,7 @@ func TestDelivery_NoTypingWhenDisabled(t *testing.T) {
 	defer srv.Close()
 	client.delivery.ShowTyping = false
 
-	client.DeliverResponse(context.Background(), testResponse())
+	_ = client.DeliverResponse(context.Background(), testResponse())
 
 	for _, l := range *logs {
 		if l.Path == "/chat/presence" {
@@ -166,7 +166,7 @@ func TestDelivery_NoMarkReadWhenDisabled(t *testing.T) {
 	defer srv.Close()
 	client.delivery.MarkAsRead = false
 
-	client.DeliverResponse(context.Background(), testResponse())
+	_ = client.DeliverResponse(context.Background(), testResponse())
 
 	for _, l := range *logs {
 		if l.Path == "/chat/markread" {
@@ -180,7 +180,7 @@ func TestDelivery_NoQuoteWhenDisabled(t *testing.T) {
 	defer srv.Close()
 	client.delivery.QuoteOriginal = false
 
-	client.DeliverResponse(context.Background(), testResponse())
+	_ = client.DeliverResponse(context.Background(), testResponse())
 
 	textReq := findRequest(*logs, "/chat/send/text")
 	if textReq == nil {
@@ -210,7 +210,7 @@ func TestDelivery_LinkPreviewEnabledWhenBodyHasURL(t *testing.T) {
 	resp := testResponse()
 	resp.Text = "Check this map: https://www.google.com/maps?q=18.94,-103.89"
 
-	client.DeliverResponse(context.Background(), resp)
+	_ = client.DeliverResponse(context.Background(), resp)
 
 	textReq := findRequest(*logs, "/chat/send/text")
 	if textReq == nil {
@@ -235,7 +235,7 @@ func TestDelivery_ImagePart(t *testing.T) {
 		},
 	}
 
-	client.DeliverResponse(context.Background(), resp)
+	_ = client.DeliverResponse(context.Background(), resp)
 
 	imgReq := findRequest(*logs, "/chat/send/image")
 	if imgReq == nil {
@@ -263,7 +263,7 @@ func TestDelivery_DocumentPart(t *testing.T) {
 		},
 	}
 
-	client.DeliverResponse(context.Background(), resp)
+	_ = client.DeliverResponse(context.Background(), resp)
 
 	docReq := findRequest(*logs, "/chat/send/document")
 	if docReq == nil {
@@ -286,7 +286,7 @@ func TestDelivery_DocumentWithImageMIMERoutesToImage(t *testing.T) {
 		},
 	}
 
-	client.DeliverResponse(context.Background(), resp)
+	_ = client.DeliverResponse(context.Background(), resp)
 
 	imgReq := findRequest(*logs, "/chat/send/image")
 	if imgReq == nil {

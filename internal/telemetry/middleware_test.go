@@ -12,7 +12,7 @@ func TestHTTPMiddleware_SetsStatusCode(t *testing.T) {
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	mw := HTTPMiddleware(m)(handler)
@@ -31,7 +31,7 @@ func TestHTTPMiddleware_Default200(t *testing.T) {
 	m := buildMetrics(NoopMeterProvider())
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	mw := HTTPMiddleware(m)(handler)

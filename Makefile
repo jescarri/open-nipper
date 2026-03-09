@@ -12,8 +12,6 @@ IMAGE_NAME=nipper
 IMAGE_TAG?=latest
 DOCKERFILE=Dockerfile
 
-# Go build flags
-#LDFLAGS=-ldflags -X main.Version="$(shell git describe --tags --always 2>/dev/null || echo dev)"
 
 build:
 	@mkdir -p $(BINARY_DIR)
@@ -35,11 +33,11 @@ clean:
 
 # Build Docker image with CGO enabled using multi-stage build
 docker-build:
-	docker buildx build --load -t $(IMAGE_NAME):$(IMAGE_TAG) --build-arg LDFLAGS="$(LDFLAGS)" -f $(DOCKERFILE) .
+	docker buildx build --load -t $(IMAGE_NAME):$(IMAGE_TAG) -f $(DOCKERFILE) .
 
 # Build and tag Docker image for release
 docker-release:
-	docker buildx build --load -t $(IMAGE_NAME):$(IMAGE_TAG) -t $(IMAGE_NAME):latest --build-arg LDFLAGS="$(LDFLAGS)" -f $(DOCKERFILE) .
+	docker buildx build --load -t $(IMAGE_NAME):$(IMAGE_TAG) -t $(IMAGE_NAME):latest -f $(DOCKERFILE) .
 
 help:
 	@echo "Available targets:"

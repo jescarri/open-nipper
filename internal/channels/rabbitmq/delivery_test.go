@@ -122,7 +122,7 @@ func TestDeliverResponse_WithReplyTo(t *testing.T) {
 	}
 
 	var payload RabbitMQResponsePayload
-	json.Unmarshal(call.Body, &payload)
+	_ = json.Unmarshal(call.Body, &payload)
 	if payload.CorrelationID != "corr-42" {
 		t.Fatalf("expected correlation ID in payload, got: %s", payload.CorrelationID)
 	}
@@ -142,7 +142,7 @@ func TestDeliverResponse_WithCorrelationIDHeader(t *testing.T) {
 		},
 	}
 
-	client.DeliverResponse(context.Background(), resp)
+	_ = client.DeliverResponse(context.Background(), resp)
 
 	call := pub.published[0]
 	if call.Headers["x-correlation-id"] != "workflow-789" {
@@ -220,7 +220,7 @@ func TestDeliverResponse_HeadersAlwaysPresent(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	client.DeliverResponse(context.Background(), resp)
+	_ = client.DeliverResponse(context.Background(), resp)
 
 	call := pub.published[0]
 	if call.Headers["x-nipper-response-id"] != "resp-007" {
@@ -243,10 +243,10 @@ func TestDeliverResponse_OriginMessageID(t *testing.T) {
 		Timestamp:       time.Now(),
 	}
 
-	client.DeliverResponse(context.Background(), resp)
+	_ = client.DeliverResponse(context.Background(), resp)
 
 	var payload RabbitMQResponsePayload
-	json.Unmarshal(pub.published[0].Body, &payload)
+	_ = json.Unmarshal(pub.published[0].Body, &payload)
 	if payload.InReplyTo != "original-msg-001" {
 		t.Fatalf("expected inReplyTo, got: %s", payload.InReplyTo)
 	}

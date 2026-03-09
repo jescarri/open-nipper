@@ -37,7 +37,7 @@ func TestProbeModelCapabilities_ListEndpoint(t *testing.T) {
 			http.NotFound(w, r)
 		case "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(lmStudioModelList)
+			_ = json.NewEncoder(w).Encode(lmStudioModelList)
 		default:
 			http.NotFound(w, r)
 		}
@@ -79,7 +79,7 @@ func TestProbeModelCapabilities_ModelEndpoint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models/mymodel" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id":                 "mymodel",
 				"object":             "model",
 				"max_context_length": 8192,
@@ -140,7 +140,7 @@ func TestProbeModelCapabilities_ModelNotInList(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/models":
 			// Return a list that does NOT contain the requested model.
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data": []map[string]any{
 					{"id": "other-model", "object": "model"},
 					{"id": "another-model", "object": "model"},

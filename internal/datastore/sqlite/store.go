@@ -103,7 +103,9 @@ func (s *Store) runMigrations(ctx context.Context) error {
 			continue
 		}
 		var v int
-		fmt.Sscanf(e.Name(), "%d", &v)
+		if _, err := fmt.Sscanf(e.Name(), "%d", &v); err != nil {
+			continue
+		}
 		if v == 0 {
 			continue
 		}
@@ -126,14 +128,14 @@ func (s *Store) runMigrations(ctx context.Context) error {
 			return fmt.Errorf("begin tx for migration %d: %w", m.version, err)
 		}
 		if _, err := tx.ExecContext(ctx, string(sqlBytes)); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %d: %w", m.version, err)
 		}
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
 			m.version, time.Now().UTC().Format(time.RFC3339),
 		); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("record migration %d: %w", m.version, err)
 		}
 		if err := tx.Commit(); err != nil {

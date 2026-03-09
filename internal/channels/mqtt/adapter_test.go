@@ -219,7 +219,7 @@ func TestAdapter_Start_ConnectError_WarnsButContinues(t *testing.T) {
 
 func TestAdapter_Stop_Disconnects(t *testing.T) {
 	a, mock := newTestAdapterWithMock(t)
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	if err := a.Stop(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -234,7 +234,7 @@ func TestAdapter_Stop_Disconnects(t *testing.T) {
 
 func TestAdapter_HealthCheck_Connected(t *testing.T) {
 	a, _ := newTestAdapterWithMock(t)
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	if err := a.HealthCheck(context.Background()); err != nil {
 		t.Fatalf("health check should pass when connected: %v", err)
@@ -322,7 +322,7 @@ func TestAdapter_DeliverEvent_IsNoOp(t *testing.T) {
 
 func TestAdapter_DeliverResponse_NilSafe(t *testing.T) {
 	a, _ := newTestAdapterWithMock(t)
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	if err := a.DeliverResponse(context.Background(), nil); err != nil {
 		t.Fatalf("nil response should be no-op: %v", err)
@@ -331,7 +331,7 @@ func TestAdapter_DeliverResponse_NilSafe(t *testing.T) {
 
 func TestAdapter_DeliverResponse_Publishes(t *testing.T) {
 	a, mock := newTestAdapterWithMock(t)
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	resp := &models.NipperResponse{
 		ResponseID:  "resp-001",
@@ -369,7 +369,7 @@ func TestAdapter_OnMessage_HandlerCalled(t *testing.T) {
 		mu.Unlock()
 		return nil
 	})
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	mqttMsg := &mockMQTTMessage{
 		topic:   "nipper/alice/inbox",
@@ -392,7 +392,7 @@ func TestAdapter_OnMessage_HandlerCalled(t *testing.T) {
 
 func TestAdapter_OnMessage_NoHandler(t *testing.T) {
 	a, _ := newTestAdapterWithMock(t)
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 	// No handler set — should not panic
 	a.onMessage(nil, &mockMQTTMessage{
 		topic:   "nipper/alice/inbox",
@@ -407,7 +407,7 @@ func TestAdapter_OnMessage_NormalizeError(t *testing.T) {
 		called = true
 		return nil
 	})
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	a.onMessage(nil, &mockMQTTMessage{
 		topic:   "nipper/alice/inbox",
@@ -425,7 +425,7 @@ func TestAdapter_OnMessage_EmptyText_Ignored(t *testing.T) {
 		called = true
 		return nil
 	})
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	a.onMessage(nil, &mockMQTTMessage{
 		topic:   "nipper/alice/inbox",
@@ -438,7 +438,7 @@ func TestAdapter_OnMessage_EmptyText_Ignored(t *testing.T) {
 
 func TestAdapter_Subscriptions_CopySemantics(t *testing.T) {
 	a, _ := newTestAdapterWithMock(t)
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	subs := a.Subscriptions()
 	if len(subs) != 2 {
@@ -452,7 +452,7 @@ func TestAdapter_Subscriptions_CopySemantics(t *testing.T) {
 
 func TestAdapter_SubscriberCount(t *testing.T) {
 	a, _ := newTestAdapterWithMock(t)
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	if a.SubscriberCount() != 2 {
 		t.Fatalf("expected 2, got %d", a.SubscriberCount())
@@ -481,7 +481,7 @@ func TestAdapter_NoUserLister_SkipsSubscriptions(t *testing.T) {
 		},
 	})
 
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 	if len(mock.subscriptions) != 0 {
 		t.Fatalf("expected 0 subscriptions without user lister, got %d", len(mock.subscriptions))
 	}
@@ -564,7 +564,7 @@ func TestAdapter_OnConnect_ResubscribesAll(t *testing.T) {
 			return mock
 		},
 	})
-	a.Start(context.Background())
+	_ = a.Start(context.Background())
 
 	mock.mu.Lock()
 	initialSubs := len(mock.subscriptions)

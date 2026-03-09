@@ -193,8 +193,8 @@ func init() {
 			fullResult, _ := resp["result"].(map[string]interface{})
 			agents, _ := fullResult["agents"].([]interface{})
 			heartbeats, _ := fullResult["heartbeats"].([]interface{})
-			hasAgents := agents != nil && len(agents) > 0
-			hasHeartbeats := heartbeats != nil && len(heartbeats) > 0
+			hasAgents := len(agents) > 0
+			hasHeartbeats := len(heartbeats) > 0
 			if !hasAgents && !hasHeartbeats {
 				fmt.Println("No agent health data (no queue status and no heartbeats from POST /agents/health).")
 				return nil

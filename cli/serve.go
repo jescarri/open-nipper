@@ -410,8 +410,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	})
 
 	// --- 9c. Agent health handler (POST /agents/health; metrics + in-memory heartbeat) ---
-	var agentHealthHandler *gateway.AgentHealthHandler
-	agentHealthHandler = gateway.NewAgentHealthHandler(gateway.AgentHealthHandlerDeps{
+	agentHealthHandler := gateway.NewAgentHealthHandler(gateway.AgentHealthHandlerDeps{
 		Repo:      repo,
 		Metrics:   metrics,
 		Heartbeat: heartbeatStore,

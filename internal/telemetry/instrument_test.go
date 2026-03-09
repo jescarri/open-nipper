@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"testing"
 
-	"go.opentelemetry.io/otel/codes"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -90,16 +89,6 @@ func TestSpanOK_WithSpan(t *testing.T) {
 	_, span := StartSpan(context.Background(), "test")
 	SpanOK(span)
 	span.End()
-}
-
-// verifySpan is a helper type for testing that implements trace.Span.
-type verifySpan struct {
-	tracenoop.Span
-	statusCode codes.Code
-}
-
-func (v *verifySpan) SetStatus(code codes.Code, _ string) {
-	v.statusCode = code
 }
 
 func TestRecordAllNilSafe(t *testing.T) {

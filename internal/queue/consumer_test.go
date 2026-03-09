@@ -63,12 +63,6 @@ func consumerWithHandler(handler EventHandler) *RabbitMQConsumer {
 	return c
 }
 
-// consumerWithChannel creates a consumer that reads from deliveryCh.
-func consumerWithChannel(handler EventHandler, deliveryCh <-chan amqp.Delivery) *RabbitMQConsumer {
-	c := consumerWithHandler(handler)
-	return c
-}
-
 func makeEvent(eventType models.NipperEventType) *models.NipperEvent {
 	return &models.NipperEvent{
 		EventID:    "evt-001",

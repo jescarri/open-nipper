@@ -31,7 +31,9 @@ func TestOpen_RunsMigrations(t *testing.T) {
 	var versions []int
 	for rows.Next() {
 		var v int
-		rows.Scan(&v)
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
 		versions = append(versions, v)
 	}
 	want := []int{1, 2, 3, 4, 5, 6}
@@ -126,7 +128,9 @@ func TestListUsers(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	for _, name := range []string{"u1", "u2", "u3"} {
-		s.CreateUser(ctx, models.CreateUserRequest{Name: name})
+		if _, err := s.CreateUser(ctx, models.CreateUserRequest{Name: name}); err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
 	}
 	users, err := s.ListUsers(ctx)
 	if err != nil {
@@ -216,7 +220,9 @@ func TestAllowlistCRUD(t *testing.T) {
 	}
 
 	// Wildcard: allow all channels.
-	s.SetAllowed(ctx, u1, "*", true, "admin")
+	if err := s.SetAllowed(ctx, u1, "*", true, "admin"); err != nil {
+		t.Fatalf("SetAllowed: %v", err)
+	}
 	allowed, _ = s.IsAllowed(ctx, u1, "mqtt")
 	if !allowed {
 		t.Error("expected wildcard to grant access")
