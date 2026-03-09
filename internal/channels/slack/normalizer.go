@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // SlackEnvelope is the top-level JSON sent by the Slack Events API.

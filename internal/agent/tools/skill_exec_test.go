@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/agent/skills"
+	"github.com/jescarri/open-nipper/internal/agent/skills"
 )
 
 func TestBuildSkillExecTool_RequiresLoaderAndExecutor(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/agent/tools"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/tools"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 func TestBashExec_SimpleCommand(t *testing.T) {

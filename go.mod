@@ -1,4 +1,4 @@
-module github.com/open-nipper/open-nipper
+module github.com/jescarri/open-nipper
 
 go 1.24.1
 

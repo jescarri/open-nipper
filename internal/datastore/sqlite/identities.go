@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // AddIdentity links a channel identity to a user.

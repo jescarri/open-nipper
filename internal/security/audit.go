@@ -12,7 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // Severity classifies the urgency of a security finding.

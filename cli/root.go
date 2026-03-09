@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-nipper/open-nipper/cli/admin"
+	"github.com/jescarri/open-nipper/cli/admin"
 )
 
 var (

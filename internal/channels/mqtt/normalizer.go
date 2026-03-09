@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // MQTTInboundPayload is the expected JSON structure received on MQTT inbox topics.

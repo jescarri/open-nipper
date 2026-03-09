@@ -16,7 +16,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // Fetcher downloads bytes from S3-compatible or plain HTTP URLs.

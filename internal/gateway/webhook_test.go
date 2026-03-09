@@ -13,8 +13,8 @@ import (
 
 	"go.uber.org/zap"
 
-	channelpkg "github.com/open-nipper/open-nipper/internal/channels"
-	"github.com/open-nipper/open-nipper/internal/models"
+	channelpkg "github.com/jescarri/open-nipper/internal/channels"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 func TestVerifyWhatsAppHMAC_Valid(t *testing.T) {

@@ -15,7 +15,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // GaugeValue is a thread-safe holder for a gauge that can be set to an absolute value.

@@ -7,8 +7,8 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
-	"github.com/open-nipper/open-nipper/internal/gateway"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/gateway"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 func newResolver(t *testing.T) *gateway.Resolver {

@@ -12,7 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 func newTestLogger() *zap.Logger {

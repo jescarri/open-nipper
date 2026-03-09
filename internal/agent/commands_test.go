@@ -7,11 +7,11 @@ import (
 
 	"go.uber.org/zap"
 
-	agentmemory "github.com/open-nipper/open-nipper/internal/agent/memory"
-	"github.com/open-nipper/open-nipper/internal/agent/registration"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/pkg/session"
+	agentmemory "github.com/jescarri/open-nipper/internal/agent/memory"
+	"github.com/jescarri/open-nipper/internal/agent/registration"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 func newTestRuntime(t *testing.T) *Runtime {

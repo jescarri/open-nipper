@@ -7,9 +7,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/datastore"
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/internal/telemetry"
+	"github.com/jescarri/open-nipper/internal/datastore"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/telemetry"
 )
 
 // AgentHealthHandler implements POST /agents/health — agents POST their status for metrics.

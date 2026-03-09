@@ -19,8 +19,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // MessageHandler is the callback invoked when an AMQP message is received.

@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // rawRouter routes requests by matching "METHOD rawPath" against the request URI.

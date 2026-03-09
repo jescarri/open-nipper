@@ -11,7 +11,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // Broker manages two long-lived AMQP connections: one for publishing (Gateway → agents)

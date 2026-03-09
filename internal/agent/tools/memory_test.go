@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/agent/memory"
+	"github.com/jescarri/open-nipper/internal/agent/memory"
 )
 
 func newTestMemStore(t *testing.T) *memory.Store {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 func openTestStore(t *testing.T) *Store {

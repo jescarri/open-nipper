@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/agent/tools"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/tools"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // ddgConfig returns a WebSearchConfig with only DuckDuckGo enabled (for tests).

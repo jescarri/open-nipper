@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 func TestSpeechEnricher_Supports(t *testing.T) {

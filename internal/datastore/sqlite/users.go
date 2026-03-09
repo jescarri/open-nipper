@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // CreateUser inserts a new user record with an auto-generated ID and returns the created user.

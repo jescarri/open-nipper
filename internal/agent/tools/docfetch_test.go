@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/agent/registration"
-	"github.com/open-nipper/open-nipper/internal/agent/tools"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/registration"
+	"github.com/jescarri/open-nipper/internal/agent/tools"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 func newTestExecutor() *tools.DocFetchExecutor {

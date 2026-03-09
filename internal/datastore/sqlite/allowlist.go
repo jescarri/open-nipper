@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // IsAllowed reports whether the user is allowed to send on channelType.

@@ -24,17 +24,17 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/agent/enrich"
-	agentmemory "github.com/open-nipper/open-nipper/internal/agent/memory"
-	agentmcp "github.com/open-nipper/open-nipper/internal/agent/mcp"
-	"github.com/open-nipper/open-nipper/internal/agent/registration"
-	"github.com/open-nipper/open-nipper/internal/agent/skills"
-	"github.com/open-nipper/open-nipper/internal/agent/tools"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/formatting"
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/internal/telemetry"
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/internal/agent/enrich"
+	agentmemory "github.com/jescarri/open-nipper/internal/agent/memory"
+	agentmcp "github.com/jescarri/open-nipper/internal/agent/mcp"
+	"github.com/jescarri/open-nipper/internal/agent/registration"
+	"github.com/jescarri/open-nipper/internal/agent/skills"
+	"github.com/jescarri/open-nipper/internal/agent/tools"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/formatting"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/telemetry"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 const consumePrefetch = 1

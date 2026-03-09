@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 func newStore(t *testing.T) *session.Store {

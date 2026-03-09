@@ -6,8 +6,8 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 func TestTranscriptLinesToEinoMessages(t *testing.T) {

@@ -23,8 +23,8 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	einomcp "github.com/cloudwego/eino-ext/components/tool/mcp"
 
-	"github.com/open-nipper/open-nipper/internal/agent/secrets"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/secrets"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 const (

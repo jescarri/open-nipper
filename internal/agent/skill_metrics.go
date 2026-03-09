@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/open-nipper/open-nipper/internal/agent/skills"
-	"github.com/open-nipper/open-nipper/internal/telemetry"
+	"github.com/jescarri/open-nipper/internal/agent/skills"
+	"github.com/jescarri/open-nipper/internal/telemetry"
 )
 
 // skillMetricsRecorder adapts telemetry.Metrics to skills.MetricsRecorder.

@@ -10,8 +10,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // publisherWithMockChannel bypasses the broker and injects a mock channel directly.

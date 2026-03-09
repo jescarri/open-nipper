@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 func TestNormalizeS3Config(t *testing.T) {

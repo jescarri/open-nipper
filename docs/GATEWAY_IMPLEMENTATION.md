@@ -140,7 +140,7 @@ open-nipper/
 
 ```go
 // go.mod (key dependencies)
-module github.com/open-nipper/open-nipper
+module github.com/jescarri/open-nipper
 
 go 1.23
 
@@ -1552,7 +1552,7 @@ The filesystem-based session store, file locking, and compaction logic live in
 agent can use:
 
 ```go
-import "github.com/open-nipper/open-nipper/pkg/session"
+import "github.com/jescarri/open-nipper/pkg/session"
 ```
 
 **Library contents:**

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // ListAtJobs returns all at jobs (for gateway startup load).

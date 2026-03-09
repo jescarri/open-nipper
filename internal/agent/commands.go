@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 // CommandAction describes the side-effect of a handled command.

@@ -9,7 +9,7 @@ import (
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/agent/skills"
+	"github.com/jescarri/open-nipper/internal/agent/skills"
 )
 
 // skillExecMaxStdoutForLLM is the max bytes of skill stdout passed to the LLM.

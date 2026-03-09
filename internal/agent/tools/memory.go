@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-nipper/open-nipper/internal/agent/memory"
+	"github.com/jescarri/open-nipper/internal/agent/memory"
 )
 
 // MemoryWriteParams defines the input for the memory_write tool.

@@ -11,7 +11,7 @@ import (
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	einoollama "github.com/cloudwego/eino-ext/components/model/ollama"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 const defaultInferenceTimeoutSeconds = 120

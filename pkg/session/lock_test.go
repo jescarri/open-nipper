@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 func TestFileLock_AcquireAndRelease(t *testing.T) {

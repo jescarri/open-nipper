@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/open-nipper/open-nipper/internal/agent/llm"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/llm"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // lmStudioModelList mimics the LM Studio /v1/models response.

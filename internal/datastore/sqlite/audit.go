@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // LogAdminAction appends an audit entry to the admin_audit table.

@@ -10,9 +10,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/channels"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/channels"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // --- Mock channel adapter ---

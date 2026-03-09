@@ -19,15 +19,15 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	goexif "github.com/rwcarlsen/goexif/exif"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/s3fetch"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/s3fetch"
 )
 
 const (
 	docFetchTimeoutSec = 60
 	maxDocBytes        = 200 * 1024 // 200 KB text content limit
 	maxDownloadBytes   = 50 * 1024 * 1024 // 50 MB raw download cap
-	docFetchUserAgent  = "Open-Nipper-Agent/1.0 (+https://github.com/open-nipper/open-nipper)"
+	docFetchUserAgent  = "Open-Nipper-Agent/1.0 (+https://github.com/jescarri/open-nipper)"
 )
 
 // DocFetchParams defines the input for the doc_fetch tool.

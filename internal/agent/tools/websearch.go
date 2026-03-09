@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 const (
@@ -19,7 +19,7 @@ const (
 	webSearchMaxResults      = 10
 	webSearchDefaultResults  = 5
 	webSearchMaxQueryLen     = 500
-	webSearchUserAgent       = "Open-Nipper-Agent/1.0 (+https://github.com/open-nipper/open-nipper)"
+	webSearchUserAgent       = "Open-Nipper-Agent/1.0 (+https://github.com/jescarri/open-nipper)"
 	ddgHTMLEndpoint          = "https://html.duckduckgo.com/html/"
 	googleCSEEndpoint        = "https://www.googleapis.com/customsearch/v1"
 	ddgMaxResponseBytes      = 512 * 1024 // 512 KB

@@ -10,8 +10,8 @@ import (
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // cronJobKey returns a unique key for a job (userID:jobID) for multi-tenant entry map.

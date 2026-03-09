@@ -12,8 +12,8 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 func TestNipperMessageToEinoMessageWithInlineImages_UsesDataURL(t *testing.T) {

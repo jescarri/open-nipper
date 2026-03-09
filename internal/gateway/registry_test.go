@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/gateway"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/gateway"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 func TestRegistry_RegisterAndLookup(t *testing.T) {
