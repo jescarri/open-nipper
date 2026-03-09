@@ -6,10 +6,13 @@ on:
   pull_request:
     branches: ['**']
 
+env:
+  GO_VERSION: '1.24.1'
+  REGISTRY: ghcr.io
+
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -17,7 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.1'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Install dependencies
         run: |
@@ -44,7 +47,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build binary
+        run: go build -o nipper ./cmd/nipper
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,37 +72,56 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+      - name: Set image name (GHCR, lowercase)
+        id: image
+        run: echo "name=${{ env.REGISTRY }}/$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Compute Docker tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tag=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            # Sanitize branch name for Docker tag: lowercase, replace invalid chars with -, collapse repeated -, limit length
+            RAW="${{ github.ref_name }}"
+            SANITIZED=$(echo "$RAW" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//' | cut -c1-128)
+            [ -z "$SANITIZED" ] && SANITIZED="branch"
+            echo "tag=$SANITIZED" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Docker meta (tags)
+        id: meta
+        run: |
+          {
+            echo "${{ steps.image.outputs.name }}:${{ steps.tag.outputs.tag }}"
+            if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" = "push" ]; then
+              echo "${{ steps.image.outputs.name }}:latest"
+            fi
+          } >> tags.txt
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          cat tags.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: opennipper/open-nipper
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build Docker image
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            LDFLAGS=-ldflags "-s -w"
 
-      - name: Run container tests
+      - name: Run container smoke test
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          docker run --rm opennipper/open-nipper:latest --help
+          docker run --rm ${{ steps.image.outputs.name }}:latest --help

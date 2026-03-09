@@ -1,0 +1,7 @@
+# go-semantic-release config: conventional commits, release from main.
+# See https://go-semantic-release.dev/
+commit_format: conventional
+release:
+  github: {}
+branch:
+  main: release
