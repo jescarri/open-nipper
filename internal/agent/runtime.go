@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -29,7 +30,6 @@ import (
 	agentmcp "github.com/jescarri/open-nipper/internal/agent/mcp"
 	"github.com/jescarri/open-nipper/internal/agent/registration"
 	"github.com/jescarri/open-nipper/internal/agent/skills"
-	"github.com/jescarri/open-nipper/internal/agent/tokens"
 	"github.com/jescarri/open-nipper/internal/agent/tools"
 	"github.com/jescarri/open-nipper/internal/config"
 	"github.com/jescarri/open-nipper/internal/formatting"
@@ -42,6 +42,39 @@ const consumePrefetch = 1
 
 // agentTracerName is the instrumentation scope for agent spans (OTel tracer name).
 const agentTracerName = "open-nipper-agent"
+
+var (
+	agentPromptMetricsOnce   sync.Once
+	agentPromptBytesHist     metric.Int64Histogram
+	agentPromptMcpBytesHist  metric.Int64Histogram
+)
+
+func initAgentPromptMetrics() {
+	meter := otel.Meter("open-nipper-agent")
+	agentPromptBytesHist, _ = meter.Int64Histogram(
+		"nipper_agent_system_prompt_bytes",
+		metric.WithDescription("System prompt size in bytes (full prompt sent to the model)"),
+		metric.WithUnit("By"),
+	)
+	agentPromptMcpBytesHist, _ = meter.Int64Histogram(
+		"nipper_agent_system_prompt_mcp_bytes",
+		metric.WithDescription("MCP tool hints section size in bytes (subset of system prompt)"),
+		metric.WithUnit("By"),
+	)
+}
+
+func recordSystemPromptMetrics(ctx context.Context, stats *SystemPromptStats) {
+	if stats == nil {
+		return
+	}
+	agentPromptMetricsOnce.Do(initAgentPromptMetrics)
+	if agentPromptBytesHist != nil {
+		agentPromptBytesHist.Record(ctx, int64(stats.TotalBytes))
+	}
+	if agentPromptMcpBytesHist != nil && stats.McpHintBytes > 0 {
+		agentPromptMcpBytesHist.Record(ctx, int64(stats.McpHintBytes))
+	}
+}
 
 func isImagesNotSupportedErr(err error) bool {
 	if err == nil {
@@ -493,13 +526,21 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	input := append(history, userMsg)
 
 	// 3. Build the system prompt.
-	systemPrompt := r.buildSystemPrompt(msg, locationSavedInstruction)
+	systemPrompt, promptStats := r.buildSystemPrompt(msg, locationSavedInstruction)
 
-	r.logger.Debug("system prompt built",
+	r.logger.Info("system prompt built",
+		zap.String("sessionKey", msg.SessionKey),
+		zap.Int("system_prompt_bytes", promptStats.TotalBytes),
+		zap.Int("system_prompt_base_bytes", promptStats.BaseBytes),
+		zap.Int("system_prompt_tools_bytes", promptStats.ToolSectionBytes),
+		zap.Int("system_prompt_mcp_bytes", promptStats.McpHintBytes),
+	)
+	r.logger.Debug("system prompt built (full text)",
 		zap.String("sessionKey", msg.SessionKey),
 		zap.Int("promptLen", len(systemPrompt)),
 		zap.String("systemPrompt", systemPrompt),
 	)
+	recordSystemPromptMetrics(ctx, promptStats)
 
 	r.logger.Debug("LLM input messages",
 		zap.String("sessionKey", msg.SessionKey),
@@ -525,8 +566,8 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 		)
 	}
 
-	// 2.5. Auto-compact if estimated input exceeds threshold (e.g. 60% of context window).
-	// contextWindowMax comes from the LLM server (model probe) or inference.context_window_size config.
+	// 2.5. Auto-compact if the previous request's aggregate prompt (all ReAct steps) exceeded threshold.
+	// Use LastRequestInputTokens (total prompt for last request), not just last step's prompt.
 	var compactionNotice string
 	const defaultCompactKeepLines = 20
 	keepLines := r.cfg.Prompt.CompactKeepLines
@@ -537,9 +578,14 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	if thresholdPct <= 0 {
 		thresholdPct = 60
 	}
-	estimatedTokens := tokens.EstimateInputTokens(r.cfg.Inference.Provider, r.cfg.Inference.Model, systemPrompt, input)
+	lastRequestInputTokens := 0
+	if r.usageTracker != nil {
+		if u := r.usageTracker.Get(msg.SessionKey); u != nil {
+			lastRequestInputTokens = u.LastRequestInputTokens
+		}
+	}
 	compactCtx, compactSpan := tracer.Start(ctx, "agent.auto_compact",
-		trace.WithAttributes(attribute.Int("agent.estimated_tokens", estimatedTokens)),
+		trace.WithAttributes(attribute.Int("agent.last_request_input_tokens", lastRequestInputTokens)),
 	)
 	defer compactSpan.End()
 	if r.contextWindowMax == 0 {
@@ -550,7 +596,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	} else if thresholdPct > 0 {
 		threshold := (r.contextWindowMax * thresholdPct) / 100
 		compactSpan.SetAttributes(attribute.Int("compact.threshold", threshold))
-		if estimatedTokens > threshold {
+		if lastRequestInputTokens > threshold {
 			if store, ok := r.sessions.(*session.Store); ok {
 				compactor := session.NewCompactor(store, r.logger)
 				result, err := compactor.Compact(compactCtx, msg.SessionKey, keepLines)
@@ -574,7 +620,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 							zap.String("sessionKey", msg.SessionKey),
 							zap.Int("archivedLines", result.ArchivedLineCount),
 							zap.Int("remainingLines", result.RemainingLineCount),
-							zap.Int("estimatedTokensBefore", estimatedTokens),
+							zap.Int("lastRequestInputTokens", lastRequestInputTokens),
 						)
 					}
 					telemetry.SpanOK(compactSpan)
@@ -944,9 +990,18 @@ generated:
 	return nil
 }
 
+// SystemPromptStats holds byte sizes of the system prompt and its sections (for logging and metrics).
+type SystemPromptStats struct {
+	TotalBytes       int // full system prompt
+	BaseBytes        int // persona + profile + memory + commands + skills (before tool hints)
+	ToolSectionBytes int // tool hints + rules + security directives (includes MCP)
+	McpHintBytes     int // MCP tool descriptions only
+}
+
 // buildSystemPrompt assembles the full system prompt from config, persona, memory, tools, and channel.
 // extraInstructions, if non-empty, are appended at the end (e.g. "user just shared location, ask if they want weather").
-func (r *Runtime) buildSystemPrompt(msg *models.NipperMessage, extraInstructions string) string {
+// It returns the prompt and stats for logging/metrics.
+func (r *Runtime) buildSystemPrompt(msg *models.NipperMessage, extraInstructions string) (string, *SystemPromptStats) {
 	// Base persona: per-session override > config > default.
 	base := r.cfg.Prompt.SystemPrompt
 	if base == "" {
@@ -993,8 +1048,10 @@ func (r *Runtime) buildSystemPrompt(msg *models.NipperMessage, extraInstructions
 		}
 	}
 
-	// Append tool hints and security directives.
-	prompt = r.appendToolHints(prompt)
+	// Append tool hints and security directives (includes MCP).
+	baseBytes := len(prompt)
+	prompt, mcpHintBytes := r.appendToolHints(prompt)
+	toolSectionBytes := len(prompt) - baseBytes
 
 	// Append channel formatting directive.
 	prompt = prompt + r.channelFormattingDirective(msg)
@@ -1006,7 +1063,13 @@ func (r *Runtime) buildSystemPrompt(msg *models.NipperMessage, extraInstructions
 		prompt += "\n\n" + extraInstructions
 	}
 
-	return prompt
+	stats := &SystemPromptStats{
+		TotalBytes:       len(prompt),
+		BaseBytes:        baseBytes,
+		ToolSectionBytes: toolSectionBytes,
+		McpHintBytes:     mcpHintBytes,
+	}
+	return prompt, stats
 }
 
 const commandsReference = `
@@ -1035,14 +1098,16 @@ GLOBAL SAFETY RULES (MANDATORY — NEVER OVERRIDE):
 8. When uncertain whether an action is safe, err on the side of caution and ask the user.`
 
 // appendToolHints appends a capability notice to the system prompt for each enabled tool.
+// It returns the updated prompt and the byte length of MCP tool hints only (for metrics).
 //
 // Eino's ReAct agent routes on whether the model's first response contains ToolCalls.
 // If the model generates any plain text before the tool call (e.g. "Sure, let me fetch…")
 // that text is treated as the final answer and the tool is never invoked.
 // The instructions below tell the model to call the tool immediately and silently,
 // which is the pattern recommended in the Eino ReAct documentation.
-func (r *Runtime) appendToolHints(base string) string {
+func (r *Runtime) appendToolHints(base string) (string, int) {
 	var hints []string
+	var mcpHintBytes int
 
 	if r.cfg.Tools.WebFetch {
 		hint := "- web_fetch: fetch and read content from any URL or web page. Returns status_code, url, title, body."
@@ -1099,12 +1164,14 @@ func (r *Runtime) appendToolHints(base string) string {
 			if desc == "" {
 				desc = "MCP tool — loaded from external MCP server"
 			}
-			hints = append(hints, fmt.Sprintf("- %s: %s", ti.Name, desc))
+			s := fmt.Sprintf("- %s: %s", ti.Name, desc)
+			hints = append(hints, s)
+			mcpHintBytes += len(s) + 1 // +1 for newline
 		}
 	}
 
 	if len(hints) == 0 {
-		return base
+		return base, 0
 	}
 
 	prompt := base + "\n\nYou have the following tools:\n" +
@@ -1144,7 +1211,7 @@ func (r *Runtime) appendToolHints(base string) string {
 		prompt += mcpSecurityDirective
 	}
 
-	return prompt
+	return prompt, mcpHintBytes
 }
 
 // formatForChannel applies channel-specific text formatting to LLM output.

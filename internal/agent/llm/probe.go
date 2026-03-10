@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -38,11 +40,12 @@ type ModelCapabilities struct {
 // ProbeModelCapabilities queries the inference server for information about the
 // configured model. It tries, in order:
 //
-//  1. GET {base_url}/models/{model_id}   — model-specific endpoint
-//  2. GET {base_url}/models              — list endpoint (picks the entry matching cfg.Model)
+//  1. GET {origin}/props              — llama.cpp/identitylabs root endpoint (actual runtime n_ctx)
+//  2. GET {base_url}/models/{model_id} — model-specific endpoint
+//  3. GET {base_url}/models            — list endpoint (picks the entry matching cfg.Model)
 //
-// Both are standard OpenAI-compatible endpoints. LM Studio additionally returns
-// max_context_length, state, arch and quantization in the list endpoint.
+// When /props succeeds, MaxContextLength is set from the server's actual context size,
+// which may be smaller than the model's training context (e.g. when -c 0 and --fit are used).
 //
 // This is a best-effort probe: a non-nil error means nothing could be reached;
 // a nil error with partial zero-value fields means the server responded but
@@ -61,21 +64,31 @@ func ProbeModelCapabilities(ctx context.Context, cfg config.InferenceConfig) (*M
 
 	client := &http.Client{Timeout: probeTimeoutSec * time.Second}
 
-	// --- attempt 1: /models/{model_id} ---
+	// --- attempt 1: /props (llama.cpp / identitylabs; actual runtime n_ctx) ---
+	if origin, err := propsOriginFromBaseURL(baseURL); err == nil {
+		propsURL := origin + "/props"
+		cap, err := probeProps(ctx, client, propsURL, apiKey)
+		if err == nil && cap != nil && cap.MaxContextLength > 0 {
+			cap.Source = "GET /props"
+			return cap, nil
+		}
+	}
+
+	// --- attempt 2: /models/{model_id} ---
 	cap, err := probeModelEndpoint(ctx, client, baseURL, cfg.Model, apiKey)
 	if err == nil {
 		cap.Source = "GET /models/" + cfg.Model
 		return cap, nil
 	}
 
-	// --- attempt 2: /models list ---
+	// --- attempt 3: /models list ---
 	cap, err = probeModelsList(ctx, client, baseURL, cfg.Model, apiKey)
 	if err == nil {
 		cap.Source = "GET /models"
 		return cap, nil
 	}
 
-	return nil, fmt.Errorf("model probe failed (tried /models/{id} and /models): %w", err)
+	return nil, fmt.Errorf("model probe failed (tried /props, /models/{id} and /models): %w", err)
 }
 
 // --- raw API response shapes ---
@@ -99,6 +112,53 @@ type openAIModelObject struct {
 
 type openAIModelList struct {
 	Data []openAIModelObject `json:"data"`
+}
+
+// propsResponse is the minimal shape we use from llama.cpp/identitylabs GET /props.
+type propsResponse struct {
+	DefaultGenerationSettings *struct {
+		NCtx int `json:"n_ctx"`
+	} `json:"default_generation_settings"`
+	ModelAlias string `json:"model_alias"`
+	ModelPath  string `json:"model_path"`
+}
+
+// propsOriginFromBaseURL returns the origin (scheme + host) of baseURL for building /props.
+// E.g. "https://llm.identitylabs.mx/v1" -> "https://llm.identitylabs.mx".
+func propsOriginFromBaseURL(baseURL string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("base_url missing scheme or host")
+	}
+	return u.Scheme + "://" + u.Host, nil
+}
+
+func probeProps(ctx context.Context, client *http.Client, propsURL, apiKey string) (*ModelCapabilities, error) {
+	body, err := doGet(ctx, client, propsURL, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	var props propsResponse
+	if err := json.Unmarshal(body, &props); err != nil {
+		return nil, fmt.Errorf("parse /props response: %w", err)
+	}
+	if props.DefaultGenerationSettings == nil || props.DefaultGenerationSettings.NCtx <= 0 {
+		return nil, fmt.Errorf("/props has no usable n_ctx")
+	}
+	id := props.ModelAlias
+	if id == "" && props.ModelPath != "" {
+		id = path.Base(props.ModelPath)
+	}
+	return &ModelCapabilities{
+		ID:               id,
+		MaxContextLength: props.DefaultGenerationSettings.NCtx,
+		State:            "",
+		Architecture:     "",
+		Quantization:     "",
+	}, nil
 }
 
 func probeModelEndpoint(ctx context.Context, client *http.Client, baseURL, modelID, apiKey string) (*ModelCapabilities, error) {

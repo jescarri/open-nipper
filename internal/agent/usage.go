@@ -33,13 +33,15 @@ func (a *requestTokenAccumulator) Totals() (prompt, completion int, steps int, l
 
 // SessionUsage tracks cumulative token usage and cost for a session.
 type SessionUsage struct {
-	TotalInputTokens  int       `json:"totalInputTokens"`
-	TotalOutputTokens int       `json:"totalOutputTokens"`
-	TotalRequests     int       `json:"totalRequests"`
-	EstimatedCostUSD  float64   `json:"estimatedCostUsd"`
-	ContextWindowSize int       `json:"contextWindowSize"`
-	LastUsagePercent  float64   `json:"lastUsagePercent"`
-	StartedAt         time.Time `json:"startedAt"`
+	TotalInputTokens       int       `json:"totalInputTokens"`
+	TotalOutputTokens      int       `json:"totalOutputTokens"`
+	TotalRequests          int       `json:"totalRequests"`
+	EstimatedCostUSD       float64   `json:"estimatedCostUsd"`
+	ContextWindowSize      int       `json:"contextWindowSize"`
+	LastUsagePercent       float64   `json:"lastUsagePercent"`
+	LastPromptTokens       int       `json:"lastPromptTokens"`       // prompt size of the most recent LLM call (last ReAct step)
+	LastRequestInputTokens int       `json:"lastRequestInputTokens"` // total prompt tokens for the last request (all ReAct steps); used for compaction
+	StartedAt              time.Time `json:"startedAt"`
 }
 
 // UsageTracker maintains per-session LLM usage statistics.
@@ -80,11 +82,13 @@ func (t *UsageTracker) Record(sessionKey string, inputTokens, outputTokens, last
 	usage.TotalRequests++
 	usage.EstimatedCostUSD += estimateCost(t.model, inputTokens, outputTokens)
 
+	// Aggregate for this request (all ReAct steps); used for compaction threshold.
+	usage.LastRequestInputTokens = inputTokens
+
 	if t.contextWindowMax > 0 {
 		usage.ContextWindowSize = t.contextWindowMax
+		usage.LastPromptTokens = lastPromptTokens
 		// Context fill = last call's prompt tokens / context window.
-		// The last call's prompt includes the full conversation + system prompt +
-		// tool definitions, so it's the best indicator of how full the window is.
 		usage.LastUsagePercent = (float64(lastPromptTokens) / float64(t.contextWindowMax)) * 100.0
 		if usage.LastUsagePercent > 100.0 {
 			usage.LastUsagePercent = 100.0

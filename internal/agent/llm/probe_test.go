@@ -152,6 +152,91 @@ func TestProbeModelCapabilities_MetaNCtxTrain(t *testing.T) {
 	}
 }
 
+func TestProbeModelCapabilities_PropsEndpoint(t *testing.T) {
+	propsBody := map[string]any{
+		"default_generation_settings": map[string]any{
+			"n_ctx": 131072,
+		},
+		"model_alias": "gpt-oss-120b-F16.gguf",
+		"model_path": "/models/gpt-oss-120b-F16.gguf",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/props" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(propsBody)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := config.InferenceConfig{
+		Provider: "local",
+		Model:    "gpt-oss-120b-F16.gguf",
+		BaseURL:  srv.URL + "/v1",
+		APIKey:   "local",
+	}
+
+	cap, err := llm.ProbeModelCapabilities(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.MaxContextLength != 131072 {
+		t.Errorf("expected MaxContextLength 131072 from /props n_ctx, got %d", cap.MaxContextLength)
+	}
+	if cap.ID != "gpt-oss-120b-F16.gguf" {
+		t.Errorf("expected ID gpt-oss-120b-F16.gguf from model_alias, got %q", cap.ID)
+	}
+	if cap.Source != "GET /props" {
+		t.Errorf("expected Source GET /props, got %q", cap.Source)
+	}
+	if cap.State != "" || cap.Architecture != "" || cap.Quantization != "" {
+		t.Errorf("props does not set state/arch/quantization; got state=%q arch=%q quant=%q", cap.State, cap.Architecture, cap.Quantization)
+	}
+}
+
+func TestProbeModelCapabilities_PropsFallback(t *testing.T) {
+	// Server has no /props (404); /v1/models returns one model. Probe should fall back to /models.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/props":
+			http.NotFound(w, r)
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "list",
+				"data": []map[string]any{
+					{"id": "fallback-model", "object": "model", "max_context_length": 8192},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := config.InferenceConfig{
+		Provider: "local",
+		Model:    "fallback-model",
+		BaseURL:  srv.URL + "/v1",
+		APIKey:   "local",
+	}
+
+	cap, err := llm.ProbeModelCapabilities(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.Source != "GET /models" {
+		t.Errorf("expected fallback Source GET /models, got %q", cap.Source)
+	}
+	if cap.MaxContextLength != 8192 {
+		t.Errorf("expected MaxContextLength 8192 from fallback, got %d", cap.MaxContextLength)
+	}
+	if cap.ID != "fallback-model" {
+		t.Errorf("expected ID fallback-model, got %q", cap.ID)
+	}
+}
+
 func TestProbeModelCapabilities_NoBaseURL(t *testing.T) {
 	cfg := config.InferenceConfig{
 		Provider: "openai",
