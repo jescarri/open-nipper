@@ -164,8 +164,14 @@ func TestFormatResponseFooter_MultiStep(t *testing.T) {
 
 func TestFormatResponseFooter_ZeroTokens(t *testing.T) {
 	footer := FormatResponseFooter("gpt-4o", 0, 0, 0, 0, 128000, time.Second)
-	if footer != "" {
-		t.Errorf("expected empty footer for zero tokens, got: %q", footer)
+	if footer == "" {
+		t.Fatal("expected footer with timing even when tokens are zero")
+	}
+	if !strings.Contains(footer, "1.00 s") {
+		t.Errorf("expected completion time in zero-token footer, got: %s", footer)
+	}
+	if strings.Contains(footer, "Tokens:") {
+		t.Errorf("expected no token counts in zero-token footer, got: %s", footer)
 	}
 }
 
@@ -174,5 +180,24 @@ func TestFormatResponseFooter_LocalModel(t *testing.T) {
 	footer := FormatResponseFooter("my-local-llama", 500, 200, 1, 500, 32000, 3*time.Second)
 	if strings.Contains(footer, "USD") {
 		t.Errorf("expected no USD cost for local model, got: %s", footer)
+	}
+}
+
+func TestFormatSessionUsageLine(t *testing.T) {
+	if got := FormatSessionUsageLine(nil); got != "" {
+		t.Errorf("FormatSessionUsageLine(nil) = %q, want \"\"", got)
+	}
+	u := &SessionUsage{
+		TotalInputTokens:  10000,
+		TotalOutputTokens: 2000,
+		ContextWindowSize: 128000,
+		LastUsagePercent:  12.5,
+	}
+	got := FormatSessionUsageLine(u)
+	if !strings.Contains(got, "10000") || !strings.Contains(got, "2000") {
+		t.Errorf("expected in/out in line, got: %s", got)
+	}
+	if !strings.Contains(got, "13%") && !strings.Contains(got, "12%") {
+		t.Errorf("expected context %% in line, got: %s", got)
 	}
 }

@@ -29,6 +29,7 @@ import (
 	agentmcp "github.com/jescarri/open-nipper/internal/agent/mcp"
 	"github.com/jescarri/open-nipper/internal/agent/registration"
 	"github.com/jescarri/open-nipper/internal/agent/skills"
+	"github.com/jescarri/open-nipper/internal/agent/tokens"
 	"github.com/jescarri/open-nipper/internal/agent/tools"
 	"github.com/jescarri/open-nipper/internal/config"
 	"github.com/jescarri/open-nipper/internal/formatting"
@@ -41,38 +42,6 @@ const consumePrefetch = 1
 
 // agentTracerName is the instrumentation scope for agent spans (OTel tracer name).
 const agentTracerName = "open-nipper-agent"
-
-// estimateInputTokens returns a rough token count for system prompt + messages.
-// Uses ~4 chars per token as a heuristic.
-func estimateInputTokens(systemPrompt string, messages []*schema.Message) int {
-	n := len(systemPrompt)
-	for _, m := range messages {
-		if m == nil {
-			continue
-		}
-		n += len(m.Content)
-		for _, p := range m.UserInputMultiContent {
-			if p.Text != "" {
-				n += len(p.Text)
-			}
-		}
-		for _, p := range m.AssistantGenMultiContent {
-			if p.Text != "" {
-				n += len(p.Text)
-			}
-		}
-		// Count tool call arguments (assistant messages with tool calls).
-		for _, tc := range m.ToolCalls {
-			n += len(tc.Function.Name) + len(tc.Function.Arguments)
-		}
-		// Count tool result content (tool response messages).
-		if m.ToolCallID != "" {
-			// Content already counted above; ToolCallID is just metadata overhead.
-			n += len(m.ToolCallID)
-		}
-	}
-	return (n + 3) / 4
-}
 
 func isImagesNotSupportedErr(err error) bool {
 	if err == nil {
@@ -557,6 +526,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	}
 
 	// 2.5. Auto-compact if estimated input exceeds threshold (e.g. 60% of context window).
+	// contextWindowMax comes from the LLM server (model probe) or inference.context_window_size config.
 	var compactionNotice string
 	const defaultCompactKeepLines = 20
 	keepLines := r.cfg.Prompt.CompactKeepLines
@@ -567,19 +537,24 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	if thresholdPct <= 0 {
 		thresholdPct = 60
 	}
-	if r.contextWindowMax > 0 && thresholdPct > 0 {
-		estimatedTokens := estimateInputTokens(systemPrompt, input)
+	estimatedTokens := tokens.EstimateInputTokens(r.cfg.Inference.Provider, r.cfg.Inference.Model, systemPrompt, input)
+	compactCtx, compactSpan := tracer.Start(ctx, "agent.auto_compact",
+		trace.WithAttributes(attribute.Int("agent.estimated_tokens", estimatedTokens)),
+	)
+	defer compactSpan.End()
+	if r.contextWindowMax == 0 {
+		r.logger.Info("auto-compaction skipped: context window size unknown (set inference.context_window_size or use a server that reports model capabilities)",
+			zap.String("sessionKey", msg.SessionKey),
+		)
+		compactSpan.SetAttributes(attribute.Bool("agent.compaction_triggered", false))
+	} else if thresholdPct > 0 {
 		threshold := (r.contextWindowMax * thresholdPct) / 100
+		compactSpan.SetAttributes(attribute.Int("compact.threshold", threshold))
 		if estimatedTokens > threshold {
 			if store, ok := r.sessions.(*session.Store); ok {
-				compactCtx, compactSpan := tracer.Start(ctx, "agent.auto_compact",
-					trace.WithAttributes(
-						attribute.Int("compact.estimated_tokens", estimatedTokens),
-						attribute.Int("compact.threshold", threshold),
-					),
-				)
 				compactor := session.NewCompactor(store, r.logger)
 				result, err := compactor.Compact(compactCtx, msg.SessionKey, keepLines)
+				compactSpan.SetAttributes(attribute.Bool("agent.compaction_triggered", result != nil && result.Compacted))
 				if err != nil {
 					r.logger.Warn("auto-compaction failed", zap.Error(err))
 					telemetry.SpanError(compactSpan, err)
@@ -604,9 +579,14 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 					}
 					telemetry.SpanOK(compactSpan)
 				}
-				compactSpan.End()
+			} else {
+				compactSpan.SetAttributes(attribute.Bool("agent.compaction_triggered", false))
 			}
+		} else {
+			compactSpan.SetAttributes(attribute.Bool("agent.compaction_triggered", false))
 		}
+	} else {
+		compactSpan.SetAttributes(attribute.Bool("agent.compaction_triggered", false))
 	}
 
 	// 3.5a. Detect topic change and prepend a suggestion to start a new context.
@@ -868,13 +848,16 @@ generated:
 	}
 
 	// 6. Optionally append a usage footer (time, tokens, cost) when the user's
-	//    skill level is above intermediate; then apply channel-specific formatting.
+	//    skill level is above intermediate; expert also gets cumulative session stats.
 	contentToFormat := result.Content
 	if profile, err := LoadProfile(r.cfg.BasePath, r.reg.UserID); err == nil && IsSkillLevelAboveIntermediate(profile.SkillLevel) {
-		if accumPrompt+accumCompletion > 0 {
-			footer := FormatResponseFooter(r.cfg.Inference.Model, accumPrompt, accumCompletion, accumSteps, accumLastPrompt, r.contextWindowMax, time.Since(startTime))
-			if footer != "" {
-				contentToFormat = result.Content + footer
+		footer := FormatResponseFooter(r.cfg.Inference.Model, accumPrompt, accumCompletion, accumSteps, accumLastPrompt, r.contextWindowMax, time.Since(startTime))
+		contentToFormat = result.Content + footer
+		if profile.SkillLevel == SkillExpert && r.usageTracker != nil {
+			if u := r.usageTracker.Get(msg.SessionKey); u != nil {
+				if line := FormatSessionUsageLine(u); line != "" {
+					contentToFormat = contentToFormat + "\n" + line
+				}
 			}
 		}
 	}
@@ -947,6 +930,17 @@ generated:
 		zap.String("sessionKey", msg.SessionKey),
 		zap.Duration("totalDuration", time.Since(startTime)),
 	)
+	if r.usageTracker != nil {
+		if u := r.usageTracker.Get(msg.SessionKey); u != nil {
+			r.logger.Info("cumulative context after message",
+				zap.String("sessionKey", msg.SessionKey),
+				zap.Int("totalInputTokens", u.TotalInputTokens),
+				zap.Int("totalOutputTokens", u.TotalOutputTokens),
+				zap.Int("contextWindowSize", u.ContextWindowSize),
+				zap.Float64("lastUsagePercent", u.LastUsagePercent),
+			)
+		}
+	}
 	return nil
 }
 
@@ -1424,12 +1418,26 @@ func (r *Runtime) buildModelCallback(sessionKey string, publisher *EventPublishe
 			return cbCtx
 		},
 		OnEnd: func(cbCtx context.Context, info *einocallbacks.RunInfo, output *model.CallbackOutput) context.Context {
+			// Resolve token usage: the compose framework converts *schema.Message to CallbackOutput
+			// with only Message set (TokenUsage left nil). When using StreamingGenerateModel, usage
+			// is merged into the aggregated message's ResponseMeta by ConcatMessages, so we fall
+			// back to Message.ResponseMeta.Usage when TokenUsage is nil.
+			usage := output.TokenUsage
+			if usage == nil && output.Message != nil && output.Message.ResponseMeta != nil && output.Message.ResponseMeta.Usage != nil {
+				u := output.Message.ResponseMeta.Usage
+				usage = &model.TokenUsage{
+					PromptTokens:     u.PromptTokens,
+					CompletionTokens: u.CompletionTokens,
+					TotalTokens:      u.TotalTokens,
+				}
+			}
+
 			if span := trace.SpanFromContext(cbCtx); span != nil {
-				if output.TokenUsage != nil {
+				if usage != nil {
 					span.SetAttributes(
-						attribute.Int("llm.prompt_tokens", output.TokenUsage.PromptTokens),
-						attribute.Int("llm.completion_tokens", output.TokenUsage.CompletionTokens),
-						attribute.Int("llm.total_tokens", output.TokenUsage.TotalTokens),
+						attribute.Int("llm.prompt_tokens", usage.PromptTokens),
+						attribute.Int("llm.completion_tokens", usage.CompletionTokens),
+						attribute.Int("llm.total_tokens", usage.TotalTokens),
 					)
 				}
 				if output.Message != nil {
@@ -1455,16 +1463,16 @@ func (r *Runtime) buildModelCallback(sessionKey string, publisher *EventPublishe
 				)
 			}
 
-			if output.TokenUsage != nil {
+			if usage != nil {
 				r.logger.Debug("LLM model token usage",
 					zap.String("sessionKey", sessionKey),
-					zap.Int("promptTokens", output.TokenUsage.PromptTokens),
-					zap.Int("completionTokens", output.TokenUsage.CompletionTokens),
-					zap.Int("totalTokens", output.TokenUsage.TotalTokens),
-					zap.Int("reasoningTokens", output.TokenUsage.CompletionTokensDetails.ReasoningTokens),
+					zap.Int("promptTokens", usage.PromptTokens),
+					zap.Int("completionTokens", usage.CompletionTokens),
+					zap.Int("totalTokens", usage.TotalTokens),
+					zap.Int("reasoningTokens", usage.CompletionTokensDetails.ReasoningTokens),
 				)
 				// Accumulate across ReAct steps so totals reflect all LLM calls.
-				accum.Add(output.TokenUsage.PromptTokens, output.TokenUsage.CompletionTokens)
+				accum.Add(usage.PromptTokens, usage.CompletionTokens)
 			}
 
 			// Log reasoning/thinking if available in extra fields or message metadata.

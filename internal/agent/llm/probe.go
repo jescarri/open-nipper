@@ -91,6 +91,10 @@ type openAIModelObject struct {
 	MaxContextLength int    `json:"max_context_length"`
 	// vLLM extension
 	MaxModelLen int `json:"max_model_len"`
+	// llama.cpp / Ollama-style: context size in data[].meta.n_ctx_train
+	Meta *struct {
+		NCtxTrain int `json:"n_ctx_train"`
+	} `json:"meta"`
 }
 
 type openAIModelList struct {
@@ -140,6 +144,10 @@ func modelObjectToCapabilities(obj openAIModelObject) *ModelCapabilities {
 	// vLLM reports max_model_len instead of max_context_length.
 	if maxCtx == 0 && obj.MaxModelLen > 0 {
 		maxCtx = obj.MaxModelLen
+	}
+	// llama.cpp / Ollama-style: data[].meta.n_ctx_train
+	if maxCtx == 0 && obj.Meta != nil && obj.Meta.NCtxTrain > 0 {
+		maxCtx = obj.Meta.NCtxTrain
 	}
 	return &ModelCapabilities{
 		ID:               obj.ID,

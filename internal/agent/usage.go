@@ -147,32 +147,49 @@ func (t *UsageTracker) FormatUsage(sessionKey string) string {
 // prompt size of the final LLM call (context fill indicator). contextWindowMax
 // is the model's context window (0 = unknown).
 func FormatResponseFooter(model string, promptTokens, completionTokens, steps, lastPromptTokens, contextWindowMax int, elapsed time.Duration) string {
-	total := promptTokens + completionTokens
-	if total == 0 {
-		return ""
-	}
 	secs := elapsed.Seconds()
-	var tokPerSec float64
-	if secs > 0 && completionTokens > 0 {
-		tokPerSec = float64(completionTokens) / secs
-	}
-	cost := estimateCost(model, promptTokens, completionTokens)
+	total := promptTokens + completionTokens
 
 	var sb strings.Builder
 	sb.WriteString("\n\n—\n")
-	sb.WriteString(fmt.Sprintf("Completion: %.2f s · Tokens: %d (in: %d, out: %d)", secs, total, promptTokens, completionTokens))
-	if steps > 1 {
-		sb.WriteString(fmt.Sprintf(" · %d steps", steps))
+	sb.WriteString(fmt.Sprintf("Completion: %.2f s", secs))
+	if total > 0 {
+		var tokPerSec float64
+		if secs > 0 && completionTokens > 0 {
+			tokPerSec = float64(completionTokens) / secs
+		}
+		cost := estimateCost(model, promptTokens, completionTokens)
+		sb.WriteString(fmt.Sprintf(" · Tokens: %d (in: %d, out: %d)", total, promptTokens, completionTokens))
+		if steps > 1 {
+			sb.WriteString(fmt.Sprintf(" · %d steps", steps))
+		}
+		if tokPerSec > 0 {
+			sb.WriteString(fmt.Sprintf(" · %.0f tok/s", tokPerSec))
+		}
+		if contextWindowMax > 0 && lastPromptTokens > 0 {
+			pct := float64(lastPromptTokens) / float64(contextWindowMax) * 100.0
+			sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%", pct))
+		}
+		if cost > 0 {
+			sb.WriteString(fmt.Sprintf(" · Est. $%.6f USD", cost))
+		}
 	}
-	if tokPerSec > 0 {
-		sb.WriteString(fmt.Sprintf(" · %.0f tok/s", tokPerSec))
+	return sb.String()
+}
+
+// FormatSessionUsageLine returns a one-line summary of cumulative session usage
+// (total in/out tokens, context fill). Used when skill level is expert.
+func FormatSessionUsageLine(usage *SessionUsage) string {
+	if usage == nil {
+		return ""
 	}
-	if contextWindowMax > 0 && lastPromptTokens > 0 {
-		pct := float64(lastPromptTokens) / float64(contextWindowMax) * 100.0
-		sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%", pct))
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Session: %d in / %d out", usage.TotalInputTokens, usage.TotalOutputTokens))
+	if usage.ContextWindowSize > 0 && usage.LastUsagePercent > 0 {
+		sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%", usage.LastUsagePercent))
 	}
-	if cost > 0 {
-		sb.WriteString(fmt.Sprintf(" · Est. $%.6f USD", cost))
+	if usage.EstimatedCostUSD > 0 {
+		sb.WriteString(fmt.Sprintf(" · $%.6f USD", usage.EstimatedCostUSD))
 	}
 	return sb.String()
 }

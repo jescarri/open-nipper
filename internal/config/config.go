@@ -338,7 +338,9 @@ type InferenceConfig struct {
 	MaxTokens         int     `yaml:"max_tokens"              mapstructure:"max_tokens"`
 	FrequencyPenalty  float64 `yaml:"frequency_penalty"       mapstructure:"frequency_penalty"`  // 0.0–2.0; penalises repeated tokens proportional to frequency (0 = off)
 	TimeoutSeconds    int     `yaml:"timeout_seconds"         mapstructure:"timeout_seconds"`    // hard deadline for each LLM HTTP call; 0 = no timeout (default 120)
-	ContextWindowSize int     `yaml:"context_window_size"    mapstructure:"context_window_size"` // fallback when model probe fails; 0 = rely on probe only
+	// ContextWindowSize is the model context limit in tokens. Used for auto-compaction and usage %.
+	// The LLM server may report this via model capabilities (probe); if not, set this explicitly.
+	ContextWindowSize int `yaml:"context_window_size" mapstructure:"context_window_size"`
 	StreamGenerate    bool    `yaml:"stream_generate"        mapstructure:"stream_generate"`    // use streaming + aggregation for Generate calls (workaround for vLLM tool call bugs)
 }
 

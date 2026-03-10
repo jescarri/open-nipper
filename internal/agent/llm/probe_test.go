@@ -110,6 +110,48 @@ func TestProbeModelCapabilities_ModelEndpoint(t *testing.T) {
 	}
 }
 
+// llamaCppStyleList mimics a /models response with data[].meta.n_ctx_train (llama.cpp / identitylabs style).
+var llamaCppStyleList = map[string]any{
+	"object": "list",
+	"data": []map[string]any{
+		{
+			"id":     "Qwen3-Next-80B-A3B-Instruct-UD-Q8_K_XL-00001-of-00002.gguf",
+			"object": "model",
+			"meta": map[string]any{
+				"n_ctx_train": 262144,
+				"n_vocab":     151936,
+			},
+		},
+	},
+}
+
+func TestProbeModelCapabilities_MetaNCtxTrain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(llamaCppStyleList)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := config.InferenceConfig{
+		Provider: "local",
+		Model:    "Qwen3-Next-80B-A3B-Instruct-UD-Q8_K_XL-00001-of-00002.gguf",
+		BaseURL:  srv.URL + "/v1",
+		APIKey:   "local",
+	}
+
+	cap, err := llm.ProbeModelCapabilities(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.MaxContextLength != 262144 {
+		t.Errorf("expected MaxContextLength 262144 from meta.n_ctx_train, got %d", cap.MaxContextLength)
+	}
+}
+
 func TestProbeModelCapabilities_NoBaseURL(t *testing.T) {
 	cfg := config.InferenceConfig{
 		Provider: "openai",
