@@ -491,6 +491,87 @@ func TestMessageHasImages(t *testing.T) {
 	}
 }
 
+func TestSalvageCleanSuffix(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantNil bool // true if we expect ""
+	}{
+		{
+			name:    "empty content",
+			input:   "",
+			wantNil: true,
+		},
+		{
+			name:  "clean content passthrough",
+			input: "Office lights turned off ✅\n\nAll set, Ralph.",
+			want:  "Office lights turned off ✅\n\nAll set, Ralph.",
+		},
+		{
+			name:  "garbled prefix with clean answer at tail",
+			input: "?... uh… *……  …  ...  ... … …\n\n... ?\n\nOops… ……\n\n... \n\n…\n\nOffice lights turned off ✅\n\nAll set, Ralph. The office is now in the dark. 🍻🕶️",
+			want:  "Office lights turned off ✅\n\nAll set, Ralph. The office is now in the dark. 🍻🕶️",
+		},
+		{
+			name:  "garbled prefix + reasoning narration + clean answer",
+			input: "?... *…… …\n\nThe user sent an audio message.\n\nWe turned off using HassTurnOff.\n\nNow we need to reply in WhatsApp style.\n\nOffice lights turned off ✅\n\nAll set, Ralph.",
+			want:  "Office lights turned off ✅\n\nAll set, Ralph.",
+		},
+		{
+			name:    "all garbled no clean suffix",
+			input:   "… … … ...\n\n…  ...\n\n...\n\n...\n\n...",
+			wantNil: true,
+		},
+		{
+			name:    "clean suffix too short",
+			input:   "… … … ...\n\n…  ...\n\n—",
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := salvageCleanSuffix(tt.input)
+			if tt.wantNil {
+				if got != "" {
+					t.Errorf("salvageCleanSuffix() = %q, want empty", got)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("salvageCleanSuffix() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsReasoningNarration(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"The user sent an audio message.", true},
+		{"We need to reply in WhatsApp style.", true},
+		{"Now we need to confirm the action.", true},
+		{"Let's craft the final answer.", true},
+		{"Office lights turned off ✅", false},
+		{"All set, Ralph.", false},
+		{"Here is the weather forecast.", false},
+		{"I turned off the lights for you.", false}, // starts with "I " not "I need"
+		{"The tool responded success.", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input[:min(len(tt.input), 30)], func(t *testing.T) {
+			got := isReasoningNarration(tt.input)
+			if got != tt.want {
+				t.Errorf("isReasoningNarration(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStripThinkTagsMultipleBlocksConcat(t *testing.T) {
 	input := "<think>thought 1</think>text<think>thought 2</think>"
 	_, thinking := stripThinkTags(input)

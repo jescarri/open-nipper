@@ -1050,7 +1050,18 @@ generated:
 				metric.WithAttributes(attribute.String("model", r.cfg.Inference.Model)),
 			)
 		}
-		result.Content = "Sorry, my response was garbled. This can happen near context limits or after model changes. Please try again or send /new to start a fresh session."
+		// Try to salvage a clean suffix: models often produce garbled prefixes
+		// (think-tag debris, reasoning narration) but the actual answer sits at
+		// the tail. Extract the last clean paragraph(s) if they look valid.
+		if salvaged := salvageCleanSuffix(result.Content); salvaged != "" {
+			r.logger.Info("salvaged clean suffix from garbled output",
+				zap.String("sessionKey", msg.SessionKey),
+				zap.Int("salvagedLen", len(salvaged)),
+			)
+			result.Content = salvaged
+		} else {
+			result.Content = "Sorry, my response was garbled. This can happen near context limits or after model changes. Please try again or send /new to start a fresh session."
+		}
 	}
 
 	// 6. Optionally append a usage footer (time, tokens, cost) when the user's
@@ -1928,6 +1939,111 @@ func isGarbledOutput(content string) bool {
 		}
 	}
 
+	return false
+}
+
+// salvageCleanSuffix walks the content backwards by paragraphs (double-newline
+// separated) and returns the longest clean tail that is NOT garbled. This
+// rescues the actual answer when models produce garbled prefixes or reasoning
+// narration followed by a valid response at the end.
+// Returns "" if no clean suffix could be found (or it's too short to be useful).
+func salvageCleanSuffix(content string) string {
+	// Split into paragraphs by blank lines.
+	paragraphs := strings.Split(content, "\n\n")
+
+	// Walk backwards, accumulating clean paragraphs.
+	var clean []string
+	for i := len(paragraphs) - 1; i >= 0; i-- {
+		p := strings.TrimSpace(paragraphs[i])
+		if p == "" {
+			continue
+		}
+		if isGarbledLine(p) {
+			break // hit a garbled paragraph, stop accumulating
+		}
+		// Also stop at reasoning narration patterns (model thinking out loud).
+		if isReasoningNarration(p) {
+			break
+		}
+		clean = append(clean, p)
+	}
+
+	if len(clean) == 0 {
+		return ""
+	}
+
+	// Reverse to restore original order.
+	for i, j := 0, len(clean)-1; i < j; i, j = i+1, j-1 {
+		clean[i], clean[j] = clean[j], clean[i]
+	}
+
+	result := strings.Join(clean, "\n\n")
+	// Only return if the salvaged content is substantial enough (not just "—" or "ok").
+	if len([]rune(result)) < 10 {
+		return ""
+	}
+	return result
+}
+
+// isGarbledLine checks if a single line/paragraph is mostly filler.
+// Uses a stricter threshold (40% meaningful) than the main garbled check
+// because individual garbled paragraphs often have scattered short words
+// like "Oops", "uh", "We" mixed with punctuation soup.
+func isGarbledLine(line string) bool {
+	total := 0
+	meaningful := 0
+	for _, r := range line {
+		total++
+		if !isNonMeaningfulRune(r) {
+			meaningful++
+		}
+	}
+	if total == 0 {
+		return true
+	}
+	// Short lines (1-2 runes): garbled if entirely non-meaningful.
+	if total <= 2 {
+		return meaningful == 0
+	}
+	return meaningful*5 < total*2 // less than 40% meaningful
+}
+
+// isReasoningNarration detects lines that look like model reasoning narration
+// (the model "thinking out loud" about what it should do). These patterns are
+// common with local models that don't wrap reasoning in <think> tags.
+func isReasoningNarration(line string) bool {
+	lower := strings.ToLower(line)
+	narrationPrefixes := []string{
+		"the user sent",
+		"the user asked",
+		"the user wants",
+		"we need to",
+		"we should",
+		"we fetched",
+		"we turned",
+		"we called",
+		"we got",
+		"now we need",
+		"now i need",
+		"let me ",
+		"let's craft",
+		"let's respond",
+		"let's reply",
+		"i need to",
+		"i should",
+		"i will",
+		"i'll ",
+		"first, i",
+		"next, i",
+		"the tool responded",
+		"the tool returned",
+		"now we must",
+	}
+	for _, prefix := range narrationPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
 	return false
 }
 
