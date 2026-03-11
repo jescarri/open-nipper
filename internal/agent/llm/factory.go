@@ -85,6 +85,10 @@ func newOpenAIModel(ctx context.Context, cfg config.InferenceConfig) (model.Chat
 		ocfg.FrequencyPenalty = &fp
 	}
 
+	if len(cfg.StopTokens) > 0 {
+		ocfg.Stop = cfg.StopTokens
+	}
+
 	// MaxTokens vs MaxCompletionTokens:
 	// OpenAI deprecated max_tokens in favor of max_completion_tokens for newer models.
 	// Reasoning models require max_completion_tokens; older models accept both.

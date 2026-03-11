@@ -142,28 +142,29 @@ func (t *UsageTracker) FormatUsage(sessionKey string) string {
 	return sb.String()
 }
 
-// FormatResponseFooter returns a compact footer with completion time, token
-// counts, tokens/second, context fill, and estimated cost. Used when the
-// user's skill level is above intermediate. Plain text so it works on any channel.
+// FormatResponseFooter returns a compact footer with generation time, token
+// counts, steps, tokens/second, context fill with compaction threshold, and
+// estimated cost.
 //
 // promptTokens and completionTokens are the accumulated totals across all
 // ReAct steps. steps is the number of LLM calls. lastPromptTokens is the
 // prompt size of the final LLM call (context fill indicator). contextWindowMax
-// is the model's context window (0 = unknown).
-func FormatResponseFooter(model string, promptTokens, completionTokens, steps, lastPromptTokens, contextWindowMax int, elapsed time.Duration) string {
+// is the model's context window (0 = unknown). compactionThresholdPct is the
+// auto-compaction trigger percentage (e.g. 60 means compaction fires at 60%).
+func FormatResponseFooter(model string, promptTokens, completionTokens, steps, lastPromptTokens, contextWindowMax, compactionThresholdPct int, elapsed time.Duration) string {
 	secs := elapsed.Seconds()
 	total := promptTokens + completionTokens
 
 	var sb strings.Builder
 	sb.WriteString("\n\n—\n")
-	sb.WriteString(fmt.Sprintf("Completion: %.2f s", secs))
+	sb.WriteString(fmt.Sprintf("%.2fs", secs))
 	if total > 0 {
 		var tokPerSec float64
 		if secs > 0 && completionTokens > 0 {
 			tokPerSec = float64(completionTokens) / secs
 		}
 		cost := estimateCost(model, promptTokens, completionTokens)
-		sb.WriteString(fmt.Sprintf(" · Tokens: %d (in: %d, out: %d)", total, promptTokens, completionTokens))
+		sb.WriteString(fmt.Sprintf(" · %d tokens (in: %d, out: %d)", total, promptTokens, completionTokens))
 		if steps > 1 {
 			sb.WriteString(fmt.Sprintf(" · %d steps", steps))
 		}
@@ -171,32 +172,20 @@ func FormatResponseFooter(model string, promptTokens, completionTokens, steps, l
 			sb.WriteString(fmt.Sprintf(" · %.0f tok/s", tokPerSec))
 		}
 		if contextWindowMax > 0 && lastPromptTokens > 0 {
-			pct := float64(lastPromptTokens) / float64(contextWindowMax) * 100.0
-			sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%", pct))
+			fillPct := float64(lastPromptTokens) / float64(contextWindowMax) * 100.0
+			if compactionThresholdPct > 0 {
+				sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%/%d%%", fillPct, compactionThresholdPct))
+			} else {
+				sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%", fillPct))
+			}
 		}
 		if cost > 0 {
-			sb.WriteString(fmt.Sprintf(" · Est. $%.6f USD", cost))
+			sb.WriteString(fmt.Sprintf(" · $%.4f", cost))
 		}
 	}
 	return sb.String()
 }
 
-// FormatSessionUsageLine returns a one-line summary of cumulative session usage
-// (total in/out tokens, context fill). Used when skill level is expert.
-func FormatSessionUsageLine(usage *SessionUsage) string {
-	if usage == nil {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Session: %d in / %d out", usage.TotalInputTokens, usage.TotalOutputTokens))
-	if usage.ContextWindowSize > 0 && usage.LastUsagePercent > 0 {
-		sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%", usage.LastUsagePercent))
-	}
-	if usage.EstimatedCostUSD > 0 {
-		sb.WriteString(fmt.Sprintf(" · $%.6f USD", usage.EstimatedCostUSD))
-	}
-	return sb.String()
-}
 
 // modelCostPerToken maps model names/prefixes to (input, output) costs per token in USD.
 // Prices as of early 2026.

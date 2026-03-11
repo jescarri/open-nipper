@@ -257,6 +257,198 @@ func TestNewLoader_SkipsDirWithoutSKILLMD(t *testing.T) {
 	}
 }
 
+func TestOneLineDesc(t *testing.T) {
+	tests := []struct {
+		name   string
+		skill  Skill
+		expect string
+	}{
+		{
+			name:   "config description takes precedence",
+			skill:  Skill{Name: "deploy", Description: "# Deploy\nDeploy the app.", Config: &SkillConfig{Description: "Automate deployments"}},
+			expect: "Automate deployments",
+		},
+		{
+			name:   "fallback to first non-header line",
+			skill:  Skill{Name: "deploy", Description: "# Deploy\nDeploy the app to production."},
+			expect: "Deploy the app to production.",
+		},
+		{
+			name:   "skips empty lines",
+			skill:  Skill{Name: "test", Description: "# Test\n\n\nRun unit tests."},
+			expect: "Run unit tests.",
+		},
+		{
+			name:   "falls back to name when only headers",
+			skill:  Skill{Name: "empty", Description: "# Empty\n## Also Empty"},
+			expect: "empty",
+		},
+		{
+			name:   "truncates long lines",
+			skill:  Skill{Name: "long", Description: strings.Repeat("A", 150)},
+			expect: strings.Repeat("A", 117) + "...",
+		},
+		{
+			name:   "nil config uses description",
+			skill:  Skill{Name: "foo", Description: "First line is content."},
+			expect: "First line is content.",
+		},
+		{
+			name:   "empty config description falls back",
+			skill:  Skill{Name: "bar", Description: "# Bar\nBar does stuff.", Config: &SkillConfig{Description: ""}},
+			expect: "Bar does stuff.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.skill.oneLineDesc()
+			if got != tt.expect {
+				t.Errorf("oneLineDesc() = %q, want %q", got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestBuildSlimPromptSection(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	for _, s := range []struct{ name, md string }{
+		{"alpha", "# Alpha\nDoes alpha things."},
+		{"beta", "# Beta\nDoes beta things."},
+	} {
+		d := filepath.Join(skillsDir, s.name)
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte(s.md), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	l, err := NewLoader(dir, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := l.BuildSlimPromptSection()
+	if section == "" {
+		t.Fatal("expected non-empty slim section")
+	}
+	if !strings.Contains(section, "- alpha: Does alpha things.") {
+		t.Errorf("missing alpha entry: %s", section)
+	}
+	if !strings.Contains(section, "- beta: Does beta things.") {
+		t.Errorf("missing beta entry: %s", section)
+	}
+	// Should NOT contain full <skill> tags
+	if strings.Contains(section, "<skill") {
+		t.Error("slim section should not contain <skill> tags")
+	}
+}
+
+func TestBuildSlimPromptSection_Empty(t *testing.T) {
+	l, err := NewLoader("", zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := l.BuildSlimPromptSection(); s != "" {
+		t.Errorf("expected empty for no skills, got %q", s)
+	}
+}
+
+func TestBuildSlimPromptSection_MCPTag(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	d := filepath.Join(skillsDir, "mcp-skill")
+	if err := os.MkdirAll(d, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte("# MCP Skill\nDoes MCP things."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "config.yaml"), []byte("name: mcp-skill\ntype: mcp\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	l, err := NewLoader(dir, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := l.BuildSlimPromptSection()
+	if !strings.Contains(section, "[MCP-only]") {
+		t.Errorf("expected [MCP-only] tag in slim section: %s", section)
+	}
+}
+
+func TestBuildPromptSectionForSkills(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	for _, s := range []struct{ name, md string }{
+		{"alpha", "# Alpha\nAlpha full description here."},
+		{"beta", "# Beta\nBeta full description here."},
+		{"gamma", "# Gamma\nGamma full description here."},
+	} {
+		d := filepath.Join(skillsDir, s.name)
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte(s.md), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	l, err := NewLoader(dir, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Only "beta" is active: beta gets full description, alpha+gamma get slim
+	section := l.BuildPromptSectionForSkills([]string{"beta"})
+	if !strings.Contains(section, "<skill name=\"beta\">") {
+		t.Errorf("expected full <skill> tag for beta: %s", section)
+	}
+	if strings.Contains(section, "<skill name=\"alpha\">") {
+		t.Error("alpha should NOT have full <skill> tag")
+	}
+	if strings.Contains(section, "<skill name=\"gamma\">") {
+		t.Error("gamma should NOT have full <skill> tag")
+	}
+	// Alpha and gamma should appear in slim list
+	if !strings.Contains(section, "- alpha:") {
+		t.Errorf("expected alpha in slim list: %s", section)
+	}
+	if !strings.Contains(section, "- gamma:") {
+		t.Errorf("expected gamma in slim list: %s", section)
+	}
+	if !strings.Contains(section, "Other skills") {
+		t.Errorf("expected 'Other skills' header: %s", section)
+	}
+}
+
+func TestBuildPromptSectionForSkills_NilActiveShowsAll(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	d := filepath.Join(skillsDir, "only")
+	if err := os.MkdirAll(d, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte("# Only\nOnly skill."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	l, err := NewLoader(dir, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	section := l.BuildPromptSectionForSkills(nil)
+	if !strings.Contains(section, "<skill name=\"only\">") {
+		t.Errorf("nil activeSkills should show full desc: %s", section)
+	}
+	// No "Other skills" section when all are active
+	if strings.Contains(section, "Other skills") {
+		t.Error("should not have 'Other skills' when all skills have full descriptions")
+	}
+}
+
 func TestNewLoader_MalformedConfigYAML(t *testing.T) {
 	dir := t.TempDir()
 	skillsDir := filepath.Join(dir, "skills")
@@ -282,6 +474,98 @@ func TestNewLoader_MalformedConfigYAML(t *testing.T) {
 	}
 	if skills[0].Config != nil {
 		t.Error("expected nil Config when config.yaml is malformed")
+	}
+}
+
+func TestSetSandboxAvailable_FiltersScriptSkills(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+
+	// Create a script skill (default type).
+	scriptDir := filepath.Join(skillsDir, "deploy")
+	if err := os.MkdirAll(scriptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "SKILL.md"), []byte("# Deploy\nDeploy the app."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "config.yaml"), []byte("name: deploy\nruntime: bash\nentrypoint: scripts/run.sh\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an MCP-only skill.
+	mcpDir := filepath.Join(skillsDir, "summarize")
+	if err := os.MkdirAll(mcpDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mcpDir, "SKILL.md"), []byte("# Summarize\nSummarize URLs."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mcpDir, "config.yaml"), []byte("name: summarize\ntype: mcp\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := NewLoader(dir, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Default: sandbox available = true, all skills visible.
+	if len(l.AvailableSkills()) != 2 {
+		t.Fatalf("expected 2 available skills with sandbox, got %d", len(l.AvailableSkills()))
+	}
+
+	// Disable sandbox: only MCP-only skills should remain.
+	l.SetSandboxAvailable(false)
+	available := l.AvailableSkills()
+	if len(available) != 1 {
+		t.Fatalf("expected 1 available skill without sandbox, got %d", len(available))
+	}
+	if available[0].Name != "summarize" {
+		t.Errorf("expected 'summarize' skill, got %q", available[0].Name)
+	}
+
+	// Prompt should only contain the MCP skill.
+	section := l.BuildPromptSection()
+	if strings.Contains(section, "deploy") {
+		t.Error("prompt should not contain script skill 'deploy' when sandbox is unavailable")
+	}
+	if !strings.Contains(section, "summarize") {
+		t.Error("prompt should contain MCP-only skill 'summarize' when sandbox is unavailable")
+	}
+
+	// Re-enable sandbox: all skills visible again.
+	l.SetSandboxAvailable(true)
+	if len(l.AvailableSkills()) != 2 {
+		t.Error("expected all skills available after re-enabling sandbox")
+	}
+}
+
+func TestSetSandboxAvailable_NoSkillsWhenAllRequireSandbox(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	scriptDir := filepath.Join(skillsDir, "deploy")
+	if err := os.MkdirAll(scriptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "SKILL.md"), []byte("# Deploy\nDeploy the app."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := NewLoader(dir, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l.SetSandboxAvailable(false)
+	if len(l.AvailableSkills()) != 0 {
+		t.Error("expected 0 available skills when only script skills exist and sandbox is unavailable")
+	}
+	if section := l.BuildPromptSection(); section != "" {
+		t.Errorf("expected empty prompt section, got %q", section)
+	}
+	if section := l.BuildSlimPromptSection(); section != "" {
+		t.Errorf("expected empty slim prompt section, got %q", section)
 	}
 }
 

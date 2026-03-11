@@ -48,6 +48,11 @@ func NewExecutor(sandbox *sandbox.Manager, providers *ProviderRegistry, logger *
 	}
 }
 
+// SandboxAvailable returns true if the executor has a sandbox manager configured.
+func (e *Executor) SandboxAvailable() bool {
+	return e.sandbox != nil
+}
+
 // Execute runs a skill's entrypoint inside the Docker sandbox with resolved secrets.
 // Standard env vars (NIPPER_PLUGIN_NAME, NIPPER_PLUGIN_DIR, etc.) are always set.
 // For MCP-only skills (type: mcp), no script is run; a guidance message is returned so the model uses MCP tools.
@@ -68,6 +73,11 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, args string, timeo
 			e.metrics.RecordSkillExecutionDuration(skill.Name, time.Since(start).Seconds())
 		}
 		return msg, "", 0, nil
+	}
+
+	// Script skills require a sandbox to execute.
+	if e.sandbox == nil {
+		return "", "", -1, fmt.Errorf("skill %q requires a sandbox to execute but sandbox is not available; enable sandbox in config or use MCP-only skills", skill.Name)
 	}
 
 	if timeout <= 0 {

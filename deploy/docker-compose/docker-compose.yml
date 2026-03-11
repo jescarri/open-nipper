@@ -1,0 +1,111 @@
+# Open-Nipper Docker Compose deployment.
+#
+# Components:
+#   - caddy:    Reverse proxy with Let's Encrypt TLS (Route53 DNS-01)
+#   - rabbitmq: Message broker for gateway <-> agent communication
+#   - gateway:  Open-Nipper gateway (HTTP server, admin API)
+#   - agent:    Open-Nipper agent (LLM-powered message processor)
+#
+# Usage:
+#   1. Copy and edit .env files: .env.caddy, .env.gateway, .env.agent
+#   2. docker compose up -d
+#
+# See docs/docker-compose.md for the full guide.
+
+services:
+  # ─── Caddy reverse proxy with Route53 DNS-01 TLS ───────────────────
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "18790:18790"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    env_file:
+      - .env.caddy
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - nipper
+
+  # ─── RabbitMQ message broker ────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    restart: unless-stopped
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: nipper
+      RABBITMQ_DEFAULT_PASS: changeme
+      RABBITMQ_DEFAULT_VHOST: /nipper
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    # Ports are NOT exposed to host — only accessible via Docker network.
+    # Uncomment to expose the management UI for debugging:
+    # ports:
+    #   - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - nipper
+
+  # ─── Open-Nipper Gateway ───────────────────────────────────────────
+  gateway:
+    image: ghcr.io/jescarri/open-nipper:latest
+    restart: unless-stopped
+    command: ["nipper", "serve", "-c", "/etc/nipper/gateway.yaml"]
+    volumes:
+      - ./gateway.yaml:/etc/nipper/gateway.yaml:ro
+      - gateway_data:/data
+    env_file:
+      - .env.gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:18789/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - nipper
+
+  # ─── Open-Nipper Agent ─────────────────────────────────────────────
+  agent:
+    image: ghcr.io/jescarri/open-nipper:latest
+    restart: unless-stopped
+    command: ["nipper", "agent", "-c", "/etc/nipper/agent.yaml"]
+    volumes:
+      - ./agent.yaml:/etc/nipper/agent.yaml:ro
+      - agent_data:/data
+      # Mount the Docker socket so the agent can create sandbox containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env.agent
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - nipper
+
+volumes:
+  caddy_data:
+  caddy_config:
+  rabbitmq_data:
+  gateway_data:
+  agent_data:
+
+networks:
+  nipper:
+    driver: bridge

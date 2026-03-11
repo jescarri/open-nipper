@@ -1,0 +1,138 @@
+gateway:
+    bind: 0.0.0.0
+    port: 18789
+    base_url: https://nipper.example.com
+    read_timeout_seconds: 30
+    write_timeout_seconds: 30
+    admin:
+        enabled: true
+        bind: 0.0.0.0
+        port: 18790
+        auth:
+            enabled: false
+            token: ${ADMIN_API_TOKEN}
+channels:
+    whatsapp:
+        enabled: false
+        config:
+            wuzapi_base_url: ""
+            wuzapi_token: ""
+            wuzapi_hmac_key: ""
+            wuzapi_instance_name: ""
+            webhook_path: ""
+            events: []
+            delivery:
+                mark_as_read: false
+                show_typing: false
+                quote_original: false
+            s3:
+                endpoint: ""
+                bucket: ""
+                access_key: ""
+                secret_key: ""
+                region: ""
+                use_ssl: false
+    slack:
+        enabled: false
+        config:
+            app_token: ""
+            bot_token: ""
+            signing_secret: ""
+            webhook_path: ""
+    cron:
+        enabled: true
+        jobs: []
+    mqtt:
+        enabled: false
+        config:
+            broker: ""
+            client_id: ""
+            username: ""
+            password: ""
+            topic_prefix: ""
+            qos: 0
+            clean_session: false
+            keep_alive: 0
+            reconnect:
+                enabled: false
+                initial_delay_ms: 0
+                max_delay_ms: 0
+    rabbitmq_channel:
+        enabled: false
+        config:
+            url: ""
+            username: ""
+            password: ""
+            vhost: ""
+            exchange_inbound: ""
+            exchange_outbound: ""
+            exchange_dlx: ""
+            prefetch: 0
+            heartbeat: 0
+            reconnect:
+                enabled: false
+                initial_delay_ms: 0
+                max_delay_ms: 0
+queue:
+    transport: rabbitmq
+    rabbitmq:
+        url: amqp://rabbitmq:5672
+        username: ${RABBITMQ_USERNAME}
+        password: ${RABBITMQ_PASSWORD}
+        vhost: /nipper
+        heartbeat: 60
+        reconnect:
+            enabled: true
+            initial_delay_ms: 1000
+            max_delay_ms: 30000
+    default_mode: steer
+    per_channel: {}
+agents:
+    health_check_interval_seconds: 30
+    consumer_timeout_seconds: 60
+    registration:
+        enabled: true
+        rate_limit: 10
+        token_rotation_on_register: true
+    rabbitmq_management:
+        url: http://rabbitmq:15672
+        username: ${RABBITMQ_MGMT_USERNAME}
+        password: ${RABBITMQ_MGMT_PASSWORD}
+security:
+    rate_limit:
+        per_user:
+            messages_per_minute: 20
+            messages_per_hour: 200
+    tools:
+        policy:
+            allow: []
+            deny: []
+datastore:
+    path: /data/nipper.db
+    wal_mode: true
+    busy_timeout_ms: 5000
+    backup:
+        enabled: true
+        schedule: 0 2 * * *
+        retention_days: 30
+        path: /data/backups/
+telemetry:
+    tracing:
+        enabled: false
+        exporter: otlp
+        protocol: http
+        endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+        url_path: ""
+        service_name: nipper-gateway
+        sample_rate: 1
+    metrics:
+        enabled: true
+        exporter: prometheus
+        prometheus_port: 9090
+        endpoint: ""
+observability:
+    enabled: true
+    sanitizer:
+        pii_redaction: true
+        credential_detection: true
+        secret_scrubbing: true

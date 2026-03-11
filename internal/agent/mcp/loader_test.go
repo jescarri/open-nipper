@@ -49,6 +49,15 @@ func TestValidateConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid streamable config",
+			cfg: config.MCPServerConfig{
+				Name:      "test-streamable",
+				Transport: "streamable",
+				URL:       "http://example.com/mcp",
+			},
+			wantErr: false,
+		},
+		{
 			name: "valid stdio config",
 			cfg: config.MCPServerConfig{
 				Name:      "test-stdio",
@@ -76,6 +85,15 @@ func TestValidateConfig(t *testing.T) {
 				URL:       "http://example.com/sse",
 			},
 			wantErr: false,
+		},
+		{
+			name: "streamable without url",
+			cfg: config.MCPServerConfig{
+				Name:      "test",
+				Transport: "streamable",
+			},
+			wantErr: true,
+			errMsg:  "STREAMABLE transport requires url",
 		},
 	}
 
@@ -213,6 +231,27 @@ func TestExpandConfig(t *testing.T) {
 			t.Fatalf("KeepAliveSeconds not preserved: got %d", expanded.KeepAliveSeconds)
 		}
 	})
+
+	t.Run("preserves Auth config", func(t *testing.T) {
+		auth := &config.MCPAuthConfig{
+			Type:      "oidc",
+			ClientID:  "my-client",
+			IssuerURL: "https://accounts.google.com",
+		}
+		cfg := config.MCPServerConfig{
+			Name:      "test",
+			Transport: "sse",
+			URL:       "http://example.com",
+			Auth:      auth,
+		}
+		expanded := expandConfig(cfg)
+		if expanded.Auth == nil {
+			t.Fatal("Auth should be preserved")
+		}
+		if expanded.Auth.ClientID != "my-client" {
+			t.Fatalf("Auth.ClientID not preserved: got %q", expanded.Auth.ClientID)
+		}
+	})
 }
 
 func TestExpandEnvSlice(t *testing.T) {
@@ -234,7 +273,7 @@ func TestExpandEnvSlice(t *testing.T) {
 }
 
 func TestNewLoaderEmptyConfig(t *testing.T) {
-	loader, err := NewLoader(t.Context(), nil, nil)
+	loader, err := NewLoader(t.Context(), nil, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("empty config should not error: %v", err)
 	}
@@ -251,7 +290,7 @@ func TestNewLoaderInvalidConfig(t *testing.T) {
 	configs := []config.MCPServerConfig{
 		{Name: "", Transport: "sse", URL: "http://example.com"},
 	}
-	_, err := NewLoader(t.Context(), configs, nil)
+	_, err := NewLoader(t.Context(), configs, nil, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error for invalid config")
 	}
@@ -264,7 +303,7 @@ func TestNewLoaderInvalidTransport(t *testing.T) {
 	configs := []config.MCPServerConfig{
 		{Name: "test", Transport: "grpc", URL: "http://example.com"},
 	}
-	_, err := NewLoader(t.Context(), configs, nil)
+	_, err := NewLoader(t.Context(), configs, nil, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error for invalid transport")
 	}
@@ -288,7 +327,7 @@ func TestLoaderNilSafety(t *testing.T) {
 }
 
 func TestToolNames(t *testing.T) {
-	loader, err := NewLoader(t.Context(), nil, nil)
+	loader, err := NewLoader(t.Context(), nil, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -326,8 +365,21 @@ func TestKeepaliveIntervalDefault(t *testing.T) {
 	}
 }
 
+func TestKeepaliveIntervalStreamable(t *testing.T) {
+	l := &Loader{
+		configs: []config.MCPServerConfig{
+			{Name: "a", Transport: "streamable", KeepAliveSeconds: 20},
+		},
+	}
+	got := l.keepaliveInterval()
+	want := 20 * time.Second
+	if got != want {
+		t.Fatalf("keepaliveInterval() = %v, want %v", got, want)
+	}
+}
+
 func TestCloseStopsContext(t *testing.T) {
-	loader, err := NewLoader(t.Context(), nil, nil)
+	loader, err := NewLoader(t.Context(), nil, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -343,7 +395,7 @@ func TestCloseStopsContext(t *testing.T) {
 }
 
 func TestCloseIsIdempotent(t *testing.T) {
-	loader, err := NewLoader(t.Context(), nil, nil)
+	loader, err := NewLoader(t.Context(), nil, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -352,7 +404,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 
 func TestToolsReturnsSnapshot(t *testing.T) {
-	loader, err := NewLoader(t.Context(), nil, nil)
+	loader, err := NewLoader(t.Context(), nil, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -370,72 +422,6 @@ func TestToolsReturnsSnapshot(t *testing.T) {
 		if t2[0] == nil {
 			t.Fatal("Tools() should return a copy, not a reference to internal state")
 		}
-	}
-}
-
-func TestWaitForReconnectNoReconnection(t *testing.T) {
-	loader, err := NewLoader(t.Context(), nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer loader.Close()
-
-	// No clients are reconnecting, should return immediately.
-	if !loader.WaitForReconnect(t.Context(), 1*time.Second) {
-		t.Fatal("WaitForReconnect should return true when nothing is reconnecting")
-	}
-}
-
-func TestWaitForReconnectCompletesWhenFlagClears(t *testing.T) {
-	loader, err := NewLoader(t.Context(), nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer loader.Close()
-
-	mc := &managedClient{name: "test"}
-	mc.reconnecting.Store(true)
-	loader.mu.Lock()
-	loader.clients = append(loader.clients, mc)
-	loader.mu.Unlock()
-
-	done := make(chan bool, 1)
-	go func() {
-		done <- loader.WaitForReconnect(t.Context(), 5*time.Second)
-	}()
-
-	// Simulate reconnection completing after a short delay.
-	time.Sleep(300 * time.Millisecond)
-	mc.reconnecting.Store(false)
-
-	result := <-done
-	if !result {
-		t.Fatal("WaitForReconnect should return true after reconnection completes")
-	}
-}
-
-func TestWaitForReconnectTimeout(t *testing.T) {
-	loader, err := NewLoader(t.Context(), nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer loader.Close()
-
-	mc := &managedClient{name: "test"}
-	mc.reconnecting.Store(true)
-	loader.mu.Lock()
-	loader.clients = append(loader.clients, mc)
-	loader.mu.Unlock()
-
-	start := time.Now()
-	result := loader.WaitForReconnect(t.Context(), 500*time.Millisecond)
-	elapsed := time.Since(start)
-
-	if result {
-		t.Fatal("WaitForReconnect should return false on timeout")
-	}
-	if elapsed < 400*time.Millisecond {
-		t.Fatalf("timed out too fast: %v", elapsed)
 	}
 }
 

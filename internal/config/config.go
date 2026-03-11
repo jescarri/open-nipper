@@ -341,7 +341,8 @@ type InferenceConfig struct {
 	// ContextWindowSize is the model context limit in tokens. Used for auto-compaction and usage %.
 	// The LLM server may report this via model capabilities (probe); if not, set this explicitly.
 	ContextWindowSize int `yaml:"context_window_size" mapstructure:"context_window_size"`
-	StreamGenerate    bool    `yaml:"stream_generate"        mapstructure:"stream_generate"`    // use streaming + aggregation for Generate calls (workaround for vLLM tool call bugs)
+	StreamGenerate    bool     `yaml:"stream_generate"        mapstructure:"stream_generate"`    // use streaming + aggregation for Generate calls (workaround for vLLM tool call bugs)
+	StopTokens        []string `yaml:"stop_tokens"            mapstructure:"stop_tokens"`        // optional stop sequences sent to the LLM; useful for local models that leak chat-template tokens (e.g. "<|end|>")
 }
 
 // SandboxConfig configures the Docker sandbox for bash execution.
@@ -419,13 +420,42 @@ func (c *WebSearchConfig) EffectiveEngine() (engine string, ok bool) {
 // MCPServerConfig configures a single MCP tool server.
 type MCPServerConfig struct {
 	Name             string            `yaml:"name"               mapstructure:"name"`
-	Transport        string            `yaml:"transport"          mapstructure:"transport"` // "stdio" | "sse"
+	Transport        string            `yaml:"transport"          mapstructure:"transport"` // "stdio" | "sse" | "streamable"
 	Command          string            `yaml:"command"            mapstructure:"command"`
 	Args             []string          `yaml:"args"               mapstructure:"args"`
 	URL              string            `yaml:"url"                mapstructure:"url"`
 	Env              []string          `yaml:"env"                mapstructure:"env"`
 	Headers          map[string]string `yaml:"headers"            mapstructure:"headers"`
 	KeepAliveSeconds int               `yaml:"keep_alive_seconds" mapstructure:"keep_alive_seconds"` // SSE ping interval; 0 = default 30s
+	Auth             *MCPAuthConfig    `yaml:"auth,omitempty"     mapstructure:"auth"`
+}
+
+// MCPAuthConfig configures OAuth/OIDC for an MCP SSE or Streamable HTTP connection.
+type MCPAuthConfig struct {
+	// Type selects the auth method. Currently only "oidc" is supported.
+	Type string `yaml:"type" mapstructure:"type"`
+	// Flow selects the OAuth flow: "device" (default) or "authorization_code".
+	// The device flow (RFC 8628) is designed for headless environments.
+	// The authorization_code flow uses PKCE with a localhost redirect and
+	// supports broader scopes (e.g. Google Calendar, Gmail).
+	Flow string `yaml:"flow" mapstructure:"flow"`
+	// ClientID is the OAuth 2.0 client ID.
+	ClientID string `yaml:"client_id" mapstructure:"client_id"`
+	// ClientSecret is optional (for confidential clients). Supports ${ENV_VAR}.
+	ClientSecret string `yaml:"client_secret" mapstructure:"client_secret"`
+	// Scopes to request (e.g. ["openid", "email"]).
+	Scopes []string `yaml:"scopes" mapstructure:"scopes"`
+	// IssuerURL is the OIDC issuer (e.g. "https://accounts.google.com").
+	// Used to discover authorization_endpoint, device_authorization_endpoint, and token_endpoint.
+	IssuerURL string `yaml:"issuer_url" mapstructure:"issuer_url"`
+	// AuthorizationURL overrides the discovered authorization_endpoint (for authorization_code flow).
+	AuthorizationURL string `yaml:"authorization_url" mapstructure:"authorization_url"`
+	// DeviceAuthURL overrides the discovered device_authorization_endpoint.
+	DeviceAuthURL string `yaml:"device_auth_url" mapstructure:"device_auth_url"`
+	// TokenURL overrides the discovered token_endpoint.
+	TokenURL string `yaml:"token_url" mapstructure:"token_url"`
+	// Audience for the token request (some providers like Auth0 require this).
+	Audience string `yaml:"audience" mapstructure:"audience"`
 }
 
 // SecretsConfig maps secret names to environment variable keys.

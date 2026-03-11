@@ -60,6 +60,16 @@ func (e *SkillExecExecutor) ExecSkillExec(ctx context.Context, params SkillExecP
 		return &SkillExecResult{ExitCode: -1}, fmt.Errorf("skill %q not found", params.Name)
 	}
 
+	// Script skills require the sandbox; reject early with a clear message if unavailable.
+	if skill.RequiresSandbox() && !e.executor.SandboxAvailable() {
+		e.logger.Warn("skill requires sandbox but sandbox is not available",
+			zap.String("skill", params.Name),
+		)
+		return &SkillExecResult{ExitCode: -1}, fmt.Errorf(
+			"skill %q requires a sandbox (Docker) to execute, but sandbox is not enabled for this agent; "+
+				"only MCP-only skills (type: mcp) can run without a sandbox", params.Name)
+	}
+
 	timeout := time.Duration(params.Timeout) * time.Second
 	stdout, stderr, exitCode, err := e.executor.Execute(ctx, skill, params.Args, timeout)
 	if err != nil {

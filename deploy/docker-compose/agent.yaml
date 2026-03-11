@@ -1,0 +1,85 @@
+agent:
+    base_path: /data
+    inference:
+        provider: openai
+        model: gpt-4o
+        base_url: ${INFERENCE_BASE_URL}
+        api_key: ${OPENAI_API_KEY}
+        temperature: 0.7
+        max_tokens: 0
+        frequency_penalty: 0
+        timeout_seconds: 120
+        context_window_size: 0
+        stream_generate: false
+        stop_tokens: []
+    sandbox:
+        enabled: true
+        image: ubuntu:noble
+        work_dir: /workspace
+        memory_limit_mb: 2048
+        cpu_limit: 2
+        timeout_seconds: 120
+        network_enabled: true
+        volume_mounts: {}
+        env:
+            - DEBIAN_FRONTEND=noninteractive
+        skills_path: ""
+        read_only: false
+    prompt:
+        system_prompt: You are a helpful assistant.
+        compaction_level: auto
+        bootstrap_file: ""
+        auto_compaction_threshold_percent: 60
+        compact_keep_lines: 20
+    tools:
+        web_fetch: true
+        web_search: true
+        bash: true
+        doc_fetcher: false
+        memory: true
+        weather: false
+        cron: true
+        web_search_config:
+            google:
+                enabled: false
+                google_api_key: ""
+                google_cx: ""
+            duck_duck_go:
+                enabled: true
+    memory:
+        max_days: 7
+        max_tokens: 4000
+    s3:
+        endpoint: ""
+        bucket: ""
+        access_key: ""
+        secret_key: ""
+        region: ""
+        use_ssl: false
+    mcp: []
+    media_enrichment:
+        speech:
+            enabled: false
+            endpoint: ""
+            timeout_seconds: 0
+    max_steps: 25
+    secrets:
+        env_map: {}
+    heartbeat_interval_seconds: 1
+    skills:
+        enabled: false
+        path: ""
+telemetry:
+    tracing:
+        enabled: false
+        exporter: otlp
+        protocol: http
+        endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+        url_path: ""
+        service_name: nipper-agent
+        sample_rate: 1
+    metrics:
+        enabled: true
+        exporter: prometheus
+        prometheus_port: 9091
+        endpoint: ""

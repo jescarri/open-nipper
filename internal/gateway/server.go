@@ -27,10 +27,11 @@ type Server struct {
 	msgRouter          *Router
 	dispatcher         *Dispatcher
 	adapters           map[models.ChannelType]channels.ChannelAdapter
-	registerHandler     *RegisterHandler
-	agentHealthHandler *AgentHealthHandler
-	agentCronHandler   *AgentCronHandler
-	agentAtHandler     *AgentAtHandler
+	registerHandler      *RegisterHandler
+	agentHealthHandler   *AgentHealthHandler
+	agentCronHandler     *AgentCronHandler
+	agentAtHandler       *AgentAtHandler
+	agentNotifyHandler   *AgentNotifyHandler
 }
 
 // ServerDeps bundles the dependencies for the main HTTP server.
@@ -42,8 +43,9 @@ type ServerDeps struct {
 	Adapters            map[models.ChannelType]channels.ChannelAdapter
 	RegisterHandler     *RegisterHandler
 	AgentHealthHandler  *AgentHealthHandler
-	AgentCronHandler     *AgentCronHandler // optional; when set, GET/POST/DELETE /agents/me/cron/jobs are registered
-	AgentAtHandler       *AgentAtHandler   // optional; when set, GET/POST/DELETE /agents/me/at/jobs are registered
+	AgentCronHandler     *AgentCronHandler   // optional; when set, GET/POST/DELETE /agents/me/cron/jobs are registered
+	AgentAtHandler       *AgentAtHandler     // optional; when set, GET/POST/DELETE /agents/me/at/jobs are registered
+	AgentNotifyHandler   *AgentNotifyHandler // optional; when set, POST /agents/me/notify is registered
 	Metrics             *telemetry.Metrics
 	// MetricsHandler is the Prometheus /metrics HTTP handler; if set, GET /metrics is registered and not logged or traced.
 	MetricsHandler http.Handler
@@ -62,8 +64,9 @@ func NewServer(deps ServerDeps) *Server {
 		adapters:           deps.Adapters,
 		registerHandler:   deps.RegisterHandler,
 		agentHealthHandler: deps.AgentHealthHandler,
-		agentCronHandler:  deps.AgentCronHandler,
-		agentAtHandler:    deps.AgentAtHandler,
+		agentCronHandler:   deps.AgentCronHandler,
+		agentAtHandler:     deps.AgentAtHandler,
+		agentNotifyHandler: deps.AgentNotifyHandler,
 	}
 	if deps.MetricsHandler != nil {
 		r.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
@@ -145,6 +148,11 @@ func (s *Server) registerRoutes() {
 		s.router.HandleFunc("/agents/me/at/jobs", s.agentAtHandler.HandleList).Methods("GET")
 		s.router.HandleFunc("/agents/me/at/jobs", s.agentAtHandler.HandleAdd).Methods("POST")
 		s.router.HandleFunc("/agents/me/at/jobs/{id}", s.agentAtHandler.HandleRemove).Methods("DELETE")
+	}
+
+	// Agent notify (direct message to user's channels, Bearer auth)
+	if s.agentNotifyHandler != nil {
+		s.router.HandleFunc("/agents/me/notify", s.agentNotifyHandler.Handle).Methods("POST")
 	}
 
 	// Health
