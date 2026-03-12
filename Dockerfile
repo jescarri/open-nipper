@@ -1,5 +1,5 @@
 # Stage 1: Build stage
-FROM golang:1.24.1-alpine AS builder
+FROM golang:1.25.0-alpine AS builder
 
 # Install build dependencies including CGO support
 RUN apk add --no-cache gcc musl-dev

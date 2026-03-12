@@ -1,3 +1,4 @@
+---
 # Semantic release: on push to main, compute next version from conventional commits,
 # create tag and GitHub release, then build and publish binaries + Docker image.
 name: Release
@@ -37,7 +38,7 @@ jobs:
         if: steps.semrel.outputs.version != ''
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.1'
+          go-version: '1.25.0'
 
       - name: Run GoReleaser
         if: steps.semrel.outputs.version != ''
