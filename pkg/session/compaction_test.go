@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 func newCompactor(t *testing.T) (*session.Compactor, *session.Store) {

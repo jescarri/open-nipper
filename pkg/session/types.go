@@ -2,7 +2,7 @@
 //
 // This package is designed to be imported by Go agents:
 //
-//	import "github.com/open-nipper/open-nipper/pkg/session"
+//	import "github.com/jescarri/open-nipper/pkg/session"
 //
 // It provides transcript storage, file locking, compaction, and session
 // lifecycle operations. The gateway does NOT use this package directly —

@@ -13,25 +13,27 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/admin"
-	"github.com/open-nipper/open-nipper/internal/allowlist"
-	"github.com/open-nipper/open-nipper/internal/channels"
-	cronadapter "github.com/open-nipper/open-nipper/internal/channels/cron"
-	mqttadapter "github.com/open-nipper/open-nipper/internal/channels/mqtt"
-	rabbitmqadapter "github.com/open-nipper/open-nipper/internal/channels/rabbitmq"
-	slackadapter "github.com/open-nipper/open-nipper/internal/channels/slack"
-	waadapter "github.com/open-nipper/open-nipper/internal/channels/whatsapp"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/datastore/sqlite"
-	"github.com/open-nipper/open-nipper/internal/gateway"
-	"github.com/open-nipper/open-nipper/internal/lifecycle"
-	"github.com/open-nipper/open-nipper/internal/logger"
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/internal/queue"
-	"github.com/open-nipper/open-nipper/internal/ratelimit"
-	"github.com/open-nipper/open-nipper/internal/security"
-	"github.com/open-nipper/open-nipper/internal/telemetry"
+	"github.com/jescarri/open-nipper/internal/admin"
+	"github.com/jescarri/open-nipper/internal/allowlist"
+	"github.com/jescarri/open-nipper/internal/channels"
+	cronadapter "github.com/jescarri/open-nipper/internal/channels/cron"
+	mqttadapter "github.com/jescarri/open-nipper/internal/channels/mqtt"
+	rabbitmqadapter "github.com/jescarri/open-nipper/internal/channels/rabbitmq"
+	slackadapter "github.com/jescarri/open-nipper/internal/channels/slack"
+	waadapter "github.com/jescarri/open-nipper/internal/channels/whatsapp"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/datastore/sqlite"
+	"github.com/jescarri/open-nipper/internal/gateway"
+	"github.com/jescarri/open-nipper/internal/lifecycle"
+	"github.com/jescarri/open-nipper/internal/logger"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/queue"
+	"github.com/jescarri/open-nipper/internal/ratelimit"
+	"github.com/jescarri/open-nipper/internal/security"
+	"github.com/jescarri/open-nipper/internal/telemetry"
 )
+
+var serveDumpConfig bool
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -39,7 +41,20 @@ var serveCmd = &cobra.Command{
 	RunE:  runServe,
 }
 
+func init() {
+	serveCmd.Flags().BoolVar(&serveDumpConfig, "dump-config", false, "Print default gateway configuration to stdout and exit")
+}
+
 func runServe(cmd *cobra.Command, _ []string) error {
+	if serveDumpConfig {
+		out, err := config.DumpGatewayConfig()
+		if err != nil {
+			return fmt.Errorf("dumping config: %w", err)
+		}
+		fmt.Print(string(out))
+		return nil
+	}
+
 	if logLevel != "" {
 		if err := os.Setenv("NIPPER_LOG_LEVEL", logLevel); err != nil {
 			return fmt.Errorf("setting log level override: %w", err)
@@ -410,8 +425,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	})
 
 	// --- 9c. Agent health handler (POST /agents/health; metrics + in-memory heartbeat) ---
-	var agentHealthHandler *gateway.AgentHealthHandler
-	agentHealthHandler = gateway.NewAgentHealthHandler(gateway.AgentHealthHandlerDeps{
+	agentHealthHandler := gateway.NewAgentHealthHandler(gateway.AgentHealthHandlerDeps{
 		Repo:      repo,
 		Metrics:   metrics,
 		Heartbeat: heartbeatStore,
@@ -455,6 +469,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		adminServer.SetAtMutator(atMutator)
 	}
 
+	// --- 9e. Agent notify handler (POST /agents/me/notify); always registered for direct user notifications ---
+	agentNotifyHandler := gateway.NewAgentNotifyHandler(gateway.AgentNotifyHandlerDeps{
+		Repo:     repo,
+		Adapters: adapters,
+		Logger:   log.Named("agent-notify"),
+	})
+
 	// --- 10. Start the main HTTP server ---
 	mainServer := gateway.NewServer(gateway.ServerDeps{
 		Logger:              log.Named("http"),
@@ -466,6 +487,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		AgentHealthHandler:  agentHealthHandler,
 		AgentCronHandler:    agentCronHandler,
 		AgentAtHandler:      agentAtHandler,
+		AgentNotifyHandler:  agentNotifyHandler,
 		Metrics:            metrics,
 		MetricsHandler:     metricsHandler,
 	})

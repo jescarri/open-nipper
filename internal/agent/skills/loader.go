@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
@@ -17,8 +18,9 @@ const (
 
 // Loader scans a skills directory and parses SKILL.md and optional config.yaml per skill.
 type Loader struct {
-	skills []Skill
-	logger *zap.Logger
+	skills           []Skill
+	logger           *zap.Logger
+	sandboxAvailable bool // when false, script-type skills are excluded from prompts
 }
 
 // NewLoader scans for skill subdirectories (each with SKILL.md). The path argument may be:
@@ -29,7 +31,7 @@ func NewLoader(basePath string, logger *zap.Logger) (*Loader, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	l := &Loader{logger: logger}
+	l := &Loader{logger: logger, sandboxAvailable: true}
 	var skillsDir string
 	if basePath == "" {
 		skillsDir = ""
@@ -112,6 +114,27 @@ func NewLoader(basePath string, logger *zap.Logger) (*Loader, error) {
 	return l, nil
 }
 
+// SetSandboxAvailable marks whether a Docker sandbox is available. When false,
+// script-type skills are excluded from prompt sections (only MCP-only skills are shown).
+func (l *Loader) SetSandboxAvailable(available bool) {
+	l.sandboxAvailable = available
+}
+
+// availableSkills returns skills that can actually execute given the current sandbox availability.
+// When sandbox is unavailable, only MCP-only skills are returned.
+func (l *Loader) availableSkills() []Skill {
+	if l.sandboxAvailable {
+		return l.skills
+	}
+	var result []Skill
+	for i := range l.skills {
+		if !l.skills[i].RequiresSandbox() {
+			result = append(result, l.skills[i])
+		}
+	}
+	return result
+}
+
 func (l *Loader) skillNames() []string {
 	names := make([]string, len(l.skills))
 	for i := range l.skills {
@@ -123,6 +146,12 @@ func (l *Loader) skillNames() []string {
 // Skills returns all loaded skills (read-only), sorted by name.
 func (l *Loader) Skills() []Skill {
 	return l.skills
+}
+
+// AvailableSkills returns skills that can actually execute given the current
+// sandbox availability. When sandbox is unavailable, only MCP-only skills are returned.
+func (l *Loader) AvailableSkills() []Skill {
+	return l.availableSkills()
 }
 
 // SkillByName returns the skill with the given name and true, or nil and false.
@@ -139,26 +168,98 @@ func (l *Loader) SkillByName(name string) (*Skill, bool) {
 // with each skill wrapped in <skill name="...">...</skill>. Empty string if no skills.
 // MCP-only skills are tagged so the model uses MCP tools directly instead of skill_exec.
 func (l *Loader) BuildPromptSection() string {
-	if len(l.skills) == 0 {
+	return l.BuildPromptSectionForSkills(nil)
+}
+
+// BuildSlimPromptSection returns a compact skills index with only name + 1-line
+// description for each skill. Use this when no skill-specific workflow is needed,
+// saving significant context tokens on local LLMs with limited context windows.
+// Skills that require a sandbox are excluded when sandbox is not available.
+func (l *Loader) BuildSlimPromptSection() string {
+	available := l.availableSkills()
+	if len(available) == 0 {
 		return ""
 	}
-	const header = "\n\n## Available Skills\n\n" +
-		"CRITICAL: Skills are NOT separate tools. Each skill name (e.g. yt_summary) is a parameter, not a tool. " +
-		"You MUST use the skill_exec tool: pass the skill name as the 'name' parameter and arguments as 'args'. " +
-		"Never call a tool by the skill name — e.g. there is no tool named yt_summary; call skill_exec with name=\"yt_summary\" instead.\n\n" +
-		"MCP-only skills (e.g. summarize_url, plant-care): there is NO tool with the skill name. Do NOT invoke summarize_url or any other MCP-only skill name as a tool. Follow that skill's steps using web_fetch and/or the MCP tools listed in the skill (e.g. list_folders, create_note, list_tags).\n\n" +
-		"After skill_exec returns a result, do NOT call skill_exec again with the same arguments. Use the data from that first result. " +
-		"For Joplin notes: verify the folder exists (list_folders), record its ID, then call create_note with that parent_id and tag_names. If the folder does not exist, create it with create_folder first. You MUST call create_note.\n\n" +
-		"For script-based skills use skill_exec (or bash with the script path). " +
-		"For MCP-only skills (tagged below) do NOT use skill_exec — use the MCP tools described in the skill directly.\n\n"
 	var b string
-	for i := range l.skills {
-		s := &l.skills[i]
-		desc := s.Description
+	b = "\n\nAvailable skills (use skill_exec tool with skill name as 'name' param; MCP-only skills use MCP tools directly):\n"
+	for i := range available {
+		s := &available[i]
+		desc := s.oneLineDesc()
+		tag := ""
 		if s.IsMCPOnly() {
-			desc += "\n\n(MCP-only skill: use the MCP tools listed in your tool set as described above; do not call skill_exec for this skill.)"
+			tag = " [MCP-only]"
 		}
-		b += "<skill name=\"" + s.Name + "\">\n" + desc + "\n</skill>\n\n"
+		b += "- " + s.Name + tag + ": " + desc + "\n"
 	}
-	return header + b
+	return b
+}
+
+// BuildPromptSectionForSkills returns the full prompt section but only includes
+// full descriptions for the named skills. Other skills get a 1-line summary.
+// If activeSkills is nil or empty, all skills get full descriptions (legacy behavior).
+// Skills that require a sandbox are excluded when sandbox is not available.
+func (l *Loader) BuildPromptSectionForSkills(activeSkills []string) string {
+	available := l.availableSkills()
+	if len(available) == 0 {
+		return ""
+	}
+
+	// If no active skills specified, include all (legacy behavior).
+	includeAll := len(activeSkills) == 0
+	activeSet := make(map[string]bool, len(activeSkills))
+	for _, name := range activeSkills {
+		activeSet[name] = true
+	}
+
+	const header = "\n\n## Available Skills\n\n" +
+		"Skills are NOT tools. Use skill_exec with the skill name as 'name' param. " +
+		"MCP-only skills: use MCP tools directly (not skill_exec).\n\n"
+
+	var fullSkills string
+	var slimSkills string
+
+	for i := range available {
+		s := &available[i]
+		if includeAll || activeSet[s.Name] {
+			desc := s.Description
+			if s.IsMCPOnly() {
+				desc += "\n\n(MCP-only: use MCP tools directly, not skill_exec.)"
+			}
+			fullSkills += "<skill name=\"" + s.Name + "\">\n" + desc + "\n</skill>\n\n"
+		} else {
+			tag := ""
+			if s.IsMCPOnly() {
+				tag = " [MCP-only]"
+			}
+			slimSkills += "- " + s.Name + tag + ": " + s.oneLineDesc() + "\n"
+		}
+	}
+
+	result := header
+	if fullSkills != "" {
+		result += fullSkills
+	}
+	if slimSkills != "" {
+		result += "Other skills (send a message mentioning the skill to activate):\n" + slimSkills
+	}
+	return result
+}
+
+// oneLineDesc extracts the first meaningful line from the SKILL.md description.
+func (s *Skill) oneLineDesc() string {
+	if s.Config != nil && s.Config.Description != "" {
+		return s.Config.Description
+	}
+	// Fall back to first non-header, non-empty line from SKILL.md.
+	for _, line := range strings.Split(s.Description, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if len(line) > 120 {
+			return line[:117] + "..."
+		}
+		return line
+	}
+	return s.Name
 }

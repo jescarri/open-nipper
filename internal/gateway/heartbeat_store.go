@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // AgentHeartbeatStore holds agent heartbeat reports in memory only (no DB).

@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/agent/registration"
+	"github.com/jescarri/open-nipper/internal/agent/registration"
 )
 
 func testLogger() *zap.Logger {
@@ -59,7 +59,7 @@ func TestRegister_Success(t *testing.T) {
 			t.Errorf("unexpected auth header: %s", r.Header.Get("Authorization"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":     true,
 			"result": want,
 		})
@@ -114,7 +114,7 @@ func TestRegister_RetriesOn503(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok": true,
 			"result": &registration.RegistrationResult{
 				AgentID: "agt-ok",

@@ -16,7 +16,7 @@ const (
 	ecCollection     = "citypageweather-realtime"
 	weatherTimeout   = 15 * time.Second
 	bboxDelta        = 0.15 // ~17 km bounding box radius
-	weatherUserAgent = "Open-Nipper-Agent/1.0 (+https://github.com/open-nipper/open-nipper)"
+	weatherUserAgent = "Open-Nipper-Agent/1.0 (+https://github.com/jescarri/open-nipper)"
 )
 
 // profileCoordsKey is the context key for fallback lat/lon from the user's profile.

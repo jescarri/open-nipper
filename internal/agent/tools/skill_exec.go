@@ -9,7 +9,7 @@ import (
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/agent/skills"
+	"github.com/jescarri/open-nipper/internal/agent/skills"
 )
 
 // skillExecMaxStdoutForLLM is the max bytes of skill stdout passed to the LLM.
@@ -58,6 +58,16 @@ func (e *SkillExecExecutor) ExecSkillExec(ctx context.Context, params SkillExecP
 	skill, ok := e.loader.SkillByName(params.Name)
 	if !ok {
 		return &SkillExecResult{ExitCode: -1}, fmt.Errorf("skill %q not found", params.Name)
+	}
+
+	// Script skills require the sandbox; reject early with a clear message if unavailable.
+	if skill.RequiresSandbox() && !e.executor.SandboxAvailable() {
+		e.logger.Warn("skill requires sandbox but sandbox is not available",
+			zap.String("skill", params.Name),
+		)
+		return &SkillExecResult{ExitCode: -1}, fmt.Errorf(
+			"skill %q requires a sandbox (Docker) to execute, but sandbox is not enabled for this agent; "+
+				"only MCP-only skills (type: mcp) can run without a sandbox", params.Name)
 	}
 
 	timeout := time.Duration(params.Timeout) * time.Second

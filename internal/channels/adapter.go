@@ -5,7 +5,7 @@ package channels
 import (
 	"context"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // TypingIndicator is an optional interface that channel adapters can implement

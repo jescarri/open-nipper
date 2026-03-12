@@ -1,50 +1,40 @@
 // Package mcp loads tools from external MCP (Model Context Protocol) servers.
-// It supports SSE and STDIO transports, with environment variable expansion
-// in all configuration fields (URLs, commands, args, headers, env vars).
+// It supports SSE, Streamable HTTP, and STDIO transports, with environment
+// variable expansion in all configuration fields.
 //
-// SSE clients are kept alive with periodic pings and automatically reconnected
-// (with exponential backoff) when the server-side session expires or the SSE
-// stream drops.
+// SSE and Streamable clients support OIDC device authorization grant for
+// headless environments. Tokens are encrypted at rest with AES-256-GCM.
 package mcp
 
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	mcpclient "github.com/mark3labs/mcp-go/client"
-	mcptransport "github.com/mark3labs/mcp-go/client/transport"
-	mcptypes "github.com/mark3labs/mcp-go/mcp"
+	"github.com/cloudwego/eino/components/tool"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
 
-	"github.com/cloudwego/eino/components/tool"
-	einomcp "github.com/cloudwego/eino-ext/components/tool/mcp"
-
-	"github.com/open-nipper/open-nipper/internal/agent/secrets"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/mcp/oidc"
+	"github.com/jescarri/open-nipper/internal/agent/secrets"
+	"github.com/jescarri/open-nipper/internal/config"
 )
+
+// DeviceAuthNotifier is called when the OIDC device authorization flow starts.
+// It receives the server name, verification URL, user code, and expiry so the
+// caller can notify the user through available channels (WhatsApp, Slack, etc.).
+type DeviceAuthNotifier func(ctx context.Context, serverName, verificationURI, userCode string, expiresIn int)
 
 const (
 	defaultKeepAliveInterval = 30 * time.Second
 	pingTimeout              = 10 * time.Second
-	reconnectInitialDelay = 1 * time.Second
-	reconnectMaxDelay     = 60 * time.Second
+	reconnectInitialDelay    = 1 * time.Second
+	reconnectMaxDelay        = 60 * time.Second
 )
-
-// softErrorHandler demotes MCP tool errors from hard Go errors to normal tool
-// response content. Without this, any isError:true response from the MCP server
-// propagates as a NodeRunError that kills the entire ReAct run before the model
-// can see the failure. By clearing IsError here, the eino-ext adapter returns
-// the error text as a regular tool result string, allowing the reasoning model
-// to read the failure and recover (e.g. by calling GetLiveContext to discover
-// the correct entity name before retrying).
-func softErrorHandler(_ context.Context, _ string, result *mcptypes.CallToolResult) (*mcptypes.CallToolResult, error) {
-	result.IsError = false
-	return result, nil
-}
 
 // Loader manages MCP client connections and exposes their tools as Eino BaseTools.
 // For SSE transports it runs a keepalive goroutine that pings each server and
@@ -55,31 +45,48 @@ type Loader struct {
 	tools   []tool.BaseTool
 	logger  *zap.Logger
 	configs []config.MCPServerConfig // expanded configs, retained for reconnection
-	ctx     context.Context
-	cancel  context.CancelFunc
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// OIDC providers keyed by server name.
+	providers map[string]*oidc.Provider
+
+	// basePath and encryptionPassword for creating new providers on reconnect.
+	basePath           string
+	encryptionPassword string
+
+	// notifier is called when an OIDC device flow starts (optional).
+	notifier DeviceAuthNotifier
 }
 
 type managedClient struct {
-	name         string
-	client       *mcpclient.Client
-	reconnecting atomic.Bool
+	name    string
+	client  *mcpsdk.Client
+	session *mcpsdk.ClientSession
 }
 
 // NewLoader creates MCP clients from config, initializes them, and loads their tools.
 // SSE clients connect to a remote URL; STDIO clients spawn a local subprocess.
 // All ${VAR} placeholders in config fields are expanded from environment variables.
-// A background keepalive goroutine is started for SSE clients; it is stopped by Close.
-func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *zap.Logger) (*Loader, error) {
+//
+// basePath is the agent's base path for storing encrypted tokens.
+// encryptionPassword is required when any MCP server uses OIDC auth.
+func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *zap.Logger, basePath, encryptionPassword string, notifier DeviceAuthNotifier) (*Loader, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 
 	loaderCtx, cancel := context.WithCancel(ctx)
 	l := &Loader{
-		logger:  logger,
-		configs: make([]config.MCPServerConfig, 0, len(configs)),
-		ctx:     loaderCtx,
-		cancel:  cancel,
+		logger:             logger,
+		configs:            make([]config.MCPServerConfig, 0, len(configs)),
+		ctx:                loaderCtx,
+		cancel:             cancel,
+		providers:          make(map[string]*oidc.Provider),
+		basePath:           basePath,
+		encryptionPassword: encryptionPassword,
+		notifier:           notifier,
 	}
 
 	hasSSE := false
@@ -92,22 +99,30 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 		expanded := expandConfig(cfg)
 		l.configs = append(l.configs, expanded)
 
-		cli, err := l.createClient(loaderCtx, expanded)
+		// Bootstrap OIDC if configured.
+		if expanded.Auth != nil && strings.ToLower(expanded.Auth.Type) == "oidc" {
+			if err := l.bootstrapOIDC(loaderCtx, expanded); err != nil {
+				l.Close()
+				return nil, fmt.Errorf("mcp server %q: %w", expanded.Name, err)
+			}
+		}
+
+		cli, session, err := l.createClient(loaderCtx, expanded)
 		if err != nil {
 			l.Close()
 			return nil, fmt.Errorf("mcp server %q: %w", expanded.Name, err)
 		}
 
 		mc := &managedClient{
-			name:   expanded.Name,
-			client: cli,
+			name:    expanded.Name,
+			client:  cli,
+			session: session,
 		}
 		l.clients = append(l.clients, mc)
 
-		if strings.ToLower(expanded.Transport) == "sse" {
+		transport := strings.ToLower(expanded.Transport)
+		if transport == "sse" || transport == "streamable" {
 			hasSSE = true
-			idx := len(l.clients) - 1
-			l.registerConnectionLostHandler(cli, expanded.Name, idx)
 		}
 
 		logger.Info("mcp server connected",
@@ -126,6 +141,43 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 	}
 
 	return l, nil
+}
+
+// bootstrapOIDC creates and initializes an OIDC provider for a server.
+func (l *Loader) bootstrapOIDC(ctx context.Context, cfg config.MCPServerConfig) error {
+	authCfg := cfg.Auth
+	providerCfg := &oidc.ProviderConfig{
+		ClientID:         secrets.ExpandString(authCfg.ClientID),
+		ClientSecret:     secrets.ExpandString(authCfg.ClientSecret),
+		Scopes:           authCfg.Scopes,
+		IssuerURL:        secrets.ExpandString(authCfg.IssuerURL),
+		AuthorizationURL: secrets.ExpandString(authCfg.AuthorizationURL),
+		DeviceAuthURL:    secrets.ExpandString(authCfg.DeviceAuthURL),
+		TokenURL:         secrets.ExpandString(authCfg.TokenURL),
+		Audience:         authCfg.Audience,
+		Flow:             authCfg.Flow,
+	}
+
+	// Convert loader notifier to OIDC provider notifier.
+	var oidcNotifier oidc.DeviceAuthNotifier
+	if l.notifier != nil {
+		loaderNotifier := l.notifier
+		oidcNotifier = func(ctx context.Context, serverName, verificationURI, userCode string, expiresIn int) {
+			loaderNotifier(ctx, serverName, verificationURI, userCode, expiresIn)
+		}
+	}
+
+	provider, err := oidc.NewProvider(ctx, providerCfg, l.basePath, cfg.Name, l.encryptionPassword, l.logger, oidcNotifier)
+	if err != nil {
+		return fmt.Errorf("OIDC setup: %w", err)
+	}
+
+	if err := provider.EnsureToken(ctx); err != nil {
+		return fmt.Errorf("OIDC token acquisition: %w", err)
+	}
+
+	l.providers[cfg.Name] = provider
+	return nil
 }
 
 // Tools returns all tools loaded from MCP servers.
@@ -165,8 +217,6 @@ type ToolInfo struct {
 }
 
 // ToolInfos returns the name and description of every loaded MCP tool.
-// Descriptions come directly from the MCP server so the system prompt can
-// give the model accurate, tool-specific guidance instead of a generic placeholder.
 func (l *Loader) ToolInfos() []ToolInfo {
 	if l == nil {
 		return nil
@@ -194,9 +244,9 @@ func (l *Loader) Close() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, mc := range l.clients {
-		if mc != nil && mc.client != nil {
-			if err := mc.client.Close(); err != nil {
-				l.logger.Warn("failed to close mcp client",
+		if mc != nil && mc.session != nil {
+			if err := mc.session.Close(); err != nil {
+				l.logger.Warn("failed to close mcp session",
 					zap.String("name", mc.name),
 					zap.Error(err),
 				)
@@ -208,32 +258,17 @@ func (l *Loader) Close() {
 }
 
 // WaitForReconnect blocks until no MCP client is actively reconnecting,
-// or until ctx is cancelled or timeout expires. Returns true if all
-// reconnections finished, false on timeout or cancellation.
+// or until ctx is cancelled or timeout expires.
 func (l *Loader) WaitForReconnect(ctx context.Context, timeout time.Duration) bool {
+	// With the official SDK, reconnection is handled internally by the
+	// Streamable transport. For SSE, we rely on keepalive pings.
+	// This is kept for API compatibility.
 	deadline := time.After(timeout)
-	for {
-		reconnecting := false
-		l.mu.RLock()
-		for _, mc := range l.clients {
-			if mc.reconnecting.Load() {
-				reconnecting = true
-				break
-			}
-		}
-		l.mu.RUnlock()
-
-		if !reconnecting {
-			return true
-		}
-
-		select {
-		case <-ctx.Done():
-			return false
-		case <-deadline:
-			return false
-		case <-time.After(200 * time.Millisecond):
-		}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-deadline:
+		return true
 	}
 }
 
@@ -253,7 +288,7 @@ func (l *Loader) keepaliveLoop() {
 		case <-l.ctx.Done():
 			return
 		case <-ticker.C:
-			l.pingAllSSE()
+			l.pingAll()
 		}
 	}
 }
@@ -261,7 +296,8 @@ func (l *Loader) keepaliveLoop() {
 func (l *Loader) keepaliveInterval() time.Duration {
 	best := defaultKeepAliveInterval
 	for _, cfg := range l.configs {
-		if strings.ToLower(cfg.Transport) == "sse" && cfg.KeepAliveSeconds > 0 {
+		transport := strings.ToLower(cfg.Transport)
+		if (transport == "sse" || transport == "streamable") && cfg.KeepAliveSeconds > 0 {
 			d := time.Duration(cfg.KeepAliveSeconds) * time.Second
 			if d < best {
 				best = d
@@ -271,23 +307,27 @@ func (l *Loader) keepaliveInterval() time.Duration {
 	return best
 }
 
-func (l *Loader) pingAllSSE() {
+func (l *Loader) pingAll() {
 	l.mu.RLock()
 	snapshot := make([]*managedClient, len(l.clients))
 	copy(snapshot, l.clients)
 	l.mu.RUnlock()
 
 	for i, mc := range snapshot {
-		if strings.ToLower(l.configs[i].Transport) != "sse" {
+		transport := strings.ToLower(l.configs[i].Transport)
+		if transport != "sse" && transport != "streamable" {
+			continue
+		}
+		if mc.session == nil {
 			continue
 		}
 
 		pingCtx, cancel := context.WithTimeout(l.ctx, pingTimeout)
-		err := mc.client.Ping(pingCtx)
+		err := mc.session.Ping(pingCtx, &mcpsdk.PingParams{})
 		cancel()
 
 		if err != nil {
-			l.logger.Warn("MCP keepalive ping failed, triggering reconnect",
+			l.logger.Warn("MCP keepalive ping failed",
 				zap.String("name", mc.name),
 				zap.Error(err),
 			)
@@ -302,16 +342,6 @@ func (l *Loader) pingAllSSE() {
 // Reconnection
 // ---------------------------------------------------------------------------
 
-func (l *Loader) registerConnectionLostHandler(cli *mcpclient.Client, name string, idx int) {
-	cli.OnConnectionLost(func(err error) {
-		l.logger.Warn("MCP SSE connection lost, triggering reconnect",
-			zap.String("name", name),
-			zap.Error(err),
-		)
-		go l.reconnectWithBackoff(idx)
-	})
-}
-
 func (l *Loader) reconnectWithBackoff(idx int) {
 	l.mu.RLock()
 	if idx >= len(l.clients) {
@@ -320,11 +350,6 @@ func (l *Loader) reconnectWithBackoff(idx int) {
 	}
 	mc := l.clients[idx]
 	l.mu.RUnlock()
-
-	if !mc.reconnecting.CompareAndSwap(false, true) {
-		return
-	}
-	defer mc.reconnecting.Store(false)
 
 	backoff := reconnectInitialDelay
 	for attempt := 1; ; attempt++ {
@@ -366,7 +391,6 @@ func (l *Loader) reconnectClient(idx int) error {
 	}
 	cfg := l.configs[idx]
 	mc := l.clients[idx]
-	oldCli := mc.client
 	l.mu.RUnlock()
 
 	l.logger.Info("reconnecting MCP client",
@@ -374,34 +398,35 @@ func (l *Loader) reconnectClient(idx int) error {
 		zap.String("transport", cfg.Transport),
 	)
 
-	if oldCli != nil {
-		_ = oldCli.Close()
+	// Re-ensure OIDC token if needed (may have expired).
+	if provider, ok := l.providers[cfg.Name]; ok {
+		if err := provider.EnsureToken(l.ctx); err != nil {
+			return fmt.Errorf("OIDC token refresh for %q: %w", mc.name, err)
+		}
 	}
 
-	// Use l.ctx (the loader's long-lived context) for createClient, NOT a
-	// timeout-derived context. The SSE transport stores the context passed to
-	// Start() and derives a child context that keeps the SSE stream alive.
-	// If we used a timeout context here its deferred cancel would immediately
-	// kill the brand-new SSE stream, triggering the connection-lost handler
-	// in an infinite reconnect loop.
-	//
-	// Timeout protection is still provided by the mcp-go library itself:
-	// SSE.Start() has a 30s endpoint wait, and SendRequest() has a 60s
-	// response timeout.
-	newCli, err := l.createClient(l.ctx, cfg)
+	// Create the new client BEFORE closing the old session so that
+	// concurrent reloadTools calls always see a usable session.
+	newCli, newSession, err := l.createClient(l.ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("creating new client for %q: %w", mc.name, err)
 	}
 
-	if strings.ToLower(cfg.Transport) == "sse" {
-		l.registerConnectionLostHandler(newCli, cfg.Name, idx)
-	}
-
+	// Swap old → new under the write lock so reloadTools never sees
+	// a closed session for this server.
 	l.mu.Lock()
+	var oldSession *mcpsdk.ClientSession
 	if idx < len(l.clients) {
+		oldSession = l.clients[idx].session
 		l.clients[idx].client = newCli
+		l.clients[idx].session = newSession
 	}
 	l.mu.Unlock()
+
+	// Close the old session AFTER the swap so it's no longer reachable.
+	if oldSession != nil {
+		_ = oldSession.Close()
+	}
 
 	if err := l.reloadTools(l.ctx); err != nil {
 		return fmt.Errorf("reloading tools after reconnect: %w", err)
@@ -414,86 +439,118 @@ func (l *Loader) reconnectClient(idx int) error {
 // Client creation and initialization
 // ---------------------------------------------------------------------------
 
-func (l *Loader) createClient(ctx context.Context, cfg config.MCPServerConfig) (*mcpclient.Client, error) {
+func (l *Loader) createClient(ctx context.Context, cfg config.MCPServerConfig) (*mcpsdk.Client, *mcpsdk.ClientSession, error) {
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{
+		Name:    "open-nipper-agent",
+		Version: "1.0.0",
+	}, nil)
+
+	transport, err := l.createTransport(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	session, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connecting to MCP server %q: %w", cfg.Name, err)
+	}
+
+	initResult := session.InitializeResult()
+	if initResult != nil {
+		l.logger.Debug("mcp server initialized",
+			zap.String("name", cfg.Name),
+			zap.String("serverName", initResult.ServerInfo.Name),
+			zap.String("serverVersion", initResult.ServerInfo.Version),
+		)
+	}
+
+	return client, session, nil
+}
+
+func (l *Loader) createTransport(cfg config.MCPServerConfig) (mcpsdk.Transport, error) {
 	switch strings.ToLower(cfg.Transport) {
 	case "sse":
-		return l.createSSEClient(ctx, cfg)
+		return l.createSSETransport(cfg)
+	case "streamable":
+		return l.createStreamableTransport(cfg)
 	case "stdio":
-		return l.createStdioClient(ctx, cfg)
+		return l.createStdioTransport(cfg)
 	default:
-		return nil, fmt.Errorf("unsupported transport %q (must be \"sse\" or \"stdio\")", cfg.Transport)
+		return nil, fmt.Errorf("unsupported transport %q (must be \"sse\", \"streamable\", or \"stdio\")", cfg.Transport)
 	}
 }
 
-func (l *Loader) createSSEClient(ctx context.Context, cfg config.MCPServerConfig) (*mcpclient.Client, error) {
+func (l *Loader) createSSETransport(cfg config.MCPServerConfig) (*mcpsdk.SSEClientTransport, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("SSE transport requires a URL")
 	}
 
-	var opts []mcptransport.ClientOption
-	if len(cfg.Headers) > 0 {
-		opts = append(opts, mcptransport.WithHeaders(cfg.Headers))
+	transport := &mcpsdk.SSEClientTransport{
+		Endpoint:   cfg.URL,
+		HTTPClient: l.buildHTTPClient(cfg),
 	}
 
-	cli, err := mcpclient.NewSSEMCPClient(cfg.URL, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("creating SSE client for %q: %w", cfg.URL, err)
-	}
-
-	if err := cli.Start(ctx); err != nil {
-		_ = cli.Close()
-		return nil, fmt.Errorf("starting SSE client for %q: %w", cfg.URL, err)
-	}
-
-	if err := l.initializeClient(ctx, cli, cfg.Name); err != nil {
-		_ = cli.Close()
-		return nil, err
-	}
-
-	return cli, nil
+	return transport, nil
 }
 
-func (l *Loader) createStdioClient(ctx context.Context, cfg config.MCPServerConfig) (*mcpclient.Client, error) {
+func (l *Loader) createStreamableTransport(cfg config.MCPServerConfig) (*mcpsdk.StreamableClientTransport, error) {
+	if cfg.URL == "" {
+		return nil, fmt.Errorf("Streamable transport requires a URL")
+	}
+
+	transport := &mcpsdk.StreamableClientTransport{
+		Endpoint:   cfg.URL,
+		HTTPClient: l.buildHTTPClient(cfg),
+	}
+
+	return transport, nil
+}
+
+func (l *Loader) createStdioTransport(cfg config.MCPServerConfig) (*mcpsdk.CommandTransport, error) {
 	if cfg.Command == "" {
 		return nil, fmt.Errorf("STDIO transport requires a command")
 	}
 
+	cmd := exec.Command(cfg.Command, cfg.Args...)
 	expandedEnv := expandEnvSlice(cfg.Env)
-
-	cli, err := mcpclient.NewStdioMCPClient(cfg.Command, expandedEnv, cfg.Args...)
-	if err != nil {
-		return nil, fmt.Errorf("creating STDIO client for %q: %w", cfg.Command, err)
+	if len(expandedEnv) > 0 {
+		cmd.Env = expandedEnv
 	}
 
-	if err := l.initializeClient(ctx, cli, cfg.Name); err != nil {
-		_ = cli.Close()
-		return nil, err
-	}
-
-	return cli, nil
+	return &mcpsdk.CommandTransport{Command: cmd}, nil
 }
 
-func (l *Loader) initializeClient(ctx context.Context, cli *mcpclient.Client, name string) error {
-	initReq := mcptypes.InitializeRequest{}
-	initReq.Params.ProtocolVersion = mcptypes.LATEST_PROTOCOL_VERSION
-	initReq.Params.ClientInfo = mcptypes.Implementation{
-		Name:    "open-nipper-agent",
-		Version: "1.0.0",
+// buildHTTPClient creates an HTTP client with optional auth and custom headers.
+func (l *Loader) buildHTTPClient(cfg config.MCPServerConfig) *http.Client {
+	var transport http.RoundTripper = http.DefaultTransport
+
+	// Add OIDC bearer token injection if configured.
+	if provider, ok := l.providers[cfg.Name]; ok {
+		transport = provider.OAuthRoundTripper(transport)
 	}
 
-	result, err := cli.Initialize(ctx, initReq)
-	if err != nil {
-		return fmt.Errorf("initializing MCP server %q: %w", name, err)
+	// Add custom headers if configured.
+	if len(cfg.Headers) > 0 {
+		transport = &headerRoundTripper{
+			base:    transport,
+			headers: cfg.Headers,
+		}
 	}
 
-	l.logger.Debug("mcp server initialized",
-		zap.String("name", name),
-		zap.String("serverName", result.ServerInfo.Name),
-		zap.String("serverVersion", result.ServerInfo.Version),
-		zap.String("protocolVersion", result.ProtocolVersion),
-	)
+	return &http.Client{Transport: transport}
+}
 
-	return nil
+// headerRoundTripper injects custom headers into every request.
+type headerRoundTripper struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	for k, v := range h.headers {
+		req.Header.Set(k, v)
+	}
+	return h.base.RoundTrip(req)
 }
 
 // ---------------------------------------------------------------------------
@@ -501,7 +558,8 @@ func (l *Loader) initializeClient(ctx context.Context, cli *mcpclient.Client, na
 // ---------------------------------------------------------------------------
 
 // reloadTools fetches tools from every connected MCP server and replaces the
-// internal tool list atomically. Safe to call from any goroutine.
+// internal tool list atomically. Servers whose ListTools call fails are
+// skipped with a warning so that one broken server does not block all others.
 func (l *Loader) reloadTools(ctx context.Context) error {
 	l.mu.RLock()
 	snapshot := make([]*managedClient, len(l.clients))
@@ -509,13 +567,20 @@ func (l *Loader) reloadTools(ctx context.Context) error {
 	l.mu.RUnlock()
 
 	var newTools []tool.BaseTool
+	var failures int
 	for _, mc := range snapshot {
-		mcpTools, err := einomcp.GetTools(ctx, &einomcp.Config{
-			Cli:                   mc.client,
-			ToolCallResultHandler: softErrorHandler,
-		})
+		if mc.session == nil {
+			continue
+		}
+
+		mcpTools, err := GetToolsFromSession(ctx, mc.session, true)
 		if err != nil {
-			return fmt.Errorf("loading tools from MCP server %q: %w", mc.name, err)
+			l.logger.Warn("skipping MCP server during tool reload (session may be reconnecting)",
+				zap.String("server", mc.name),
+				zap.Error(err),
+			)
+			failures++
+			continue
 		}
 
 		l.logger.Info("mcp tools loaded",
@@ -539,11 +604,26 @@ func (l *Loader) reloadTools(ctx context.Context) error {
 		newTools = append(newTools, mcpTools...)
 	}
 
+	// If ALL servers failed, keep existing tools rather than clearing them.
+	if failures > 0 && len(newTools) == 0 {
+		l.logger.Warn("all MCP servers failed tool reload; keeping previous tool set",
+			zap.Int("failures", failures),
+		)
+		return fmt.Errorf("all %d MCP servers failed to reload tools", failures)
+	}
+
 	newTools = WrapTools(newTools, l.logger)
 
 	l.mu.Lock()
 	l.tools = newTools
 	l.mu.Unlock()
+
+	if failures > 0 {
+		l.logger.Warn("tool reload completed with partial failures",
+			zap.Int("failures", failures),
+			zap.Int("totalTools", len(newTools)),
+		)
+	}
 
 	return nil
 }
@@ -558,11 +638,11 @@ func validateConfig(cfg config.MCPServerConfig) error {
 		return fmt.Errorf("name is required")
 	}
 	transport := strings.ToLower(cfg.Transport)
-	if transport != "sse" && transport != "stdio" {
-		return fmt.Errorf("transport must be \"sse\" or \"stdio\", got %q", cfg.Transport)
+	if transport != "sse" && transport != "stdio" && transport != "streamable" {
+		return fmt.Errorf("transport must be \"sse\", \"streamable\", or \"stdio\", got %q", cfg.Transport)
 	}
-	if transport == "sse" && cfg.URL == "" {
-		return fmt.Errorf("SSE transport requires url")
+	if (transport == "sse" || transport == "streamable") && cfg.URL == "" {
+		return fmt.Errorf("%s transport requires url", strings.ToUpper(transport))
 	}
 	if transport == "stdio" && cfg.Command == "" {
 		return fmt.Errorf("STDIO transport requires command")
@@ -580,6 +660,7 @@ func expandConfig(cfg config.MCPServerConfig) config.MCPServerConfig {
 		Args:             make([]string, len(cfg.Args)),
 		Env:              make([]string, len(cfg.Env)),
 		KeepAliveSeconds: cfg.KeepAliveSeconds,
+		Auth:             cfg.Auth,
 	}
 
 	for i, a := range cfg.Args {

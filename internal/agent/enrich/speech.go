@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/s3fetch"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/s3fetch"
 )
 
 const (

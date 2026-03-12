@@ -13,10 +13,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/formatting"
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/internal/s3fetch"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/formatting"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/s3fetch"
 )
 
 const (
@@ -281,7 +281,7 @@ func (w *WuzapiClient) HealthCheck(ctx context.Context) error {
 		return fmt.Errorf("wuzapi health check: %w", err)
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("wuzapi health check: status %d", resp.StatusCode)
@@ -308,7 +308,7 @@ func (w *WuzapiClient) post(ctx context.Context, path string, payload any) error
 		return fmt.Errorf("POST %s: %w", path, err)
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("POST %s: status %d", path, resp.StatusCode)

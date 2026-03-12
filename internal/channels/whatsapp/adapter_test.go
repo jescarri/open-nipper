@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
-	channelpkg "github.com/open-nipper/open-nipper/internal/channels"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	channelpkg "github.com/jescarri/open-nipper/internal/channels"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // Compile-time check: Adapter implements ChannelAdapter.

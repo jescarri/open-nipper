@@ -10,9 +10,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/channels"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/channels"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // --- Mock channel adapter ---
@@ -88,8 +88,7 @@ type mockRepo struct {
 func (r *mockRepo) ResolveIdentity(_ context.Context, _, _ string) (string, error) {
 	// key format: channelType|identity
 	if len(r.identities) > 0 {
-		// This mock method is used in tests that pass a fixed resolvedUserID.
-		// Keep map-backed behavior optional to avoid changing existing tests.
+		_ = r.identities // optional map-backed behavior for tests
 	}
 	return r.resolvedUserID, r.resolveErr
 }
@@ -305,8 +304,8 @@ func TestRouter_DeduplicationSuppresses(t *testing.T) {
 	msg := newWhatsAppMsg()
 	adapter := &mockAdapter{ct: models.ChannelTypeWhatsApp, msg: msg}
 
-	r.HandleMessage(context.Background(), []byte("{}"), adapter)
-	r.HandleMessage(context.Background(), []byte("{}"), adapter)
+	_ = r.HandleMessage(context.Background(), []byte("{}"), adapter)
+	_ = r.HandleMessage(context.Background(), []byte("{}"), adapter)
 
 	pub.mu.Lock()
 	defer pub.mu.Unlock()
@@ -399,7 +398,7 @@ func TestRouter_SessionKeyAndRegistryPopulated(t *testing.T) {
 
 	adapter := &mockAdapter{ct: models.ChannelTypeWhatsApp, msg: newWhatsAppMsg()}
 
-	r.HandleMessage(context.Background(), []byte("{}"), adapter)
+	_ = r.HandleMessage(context.Background(), []byte("{}"), adapter)
 
 	pub.mu.Lock()
 	key := pub.messages[0].Message.SessionKey
@@ -424,7 +423,7 @@ func TestRouter_UserResolution(t *testing.T) {
 	msg.UserID = "" // force resolution
 	adapter := &mockAdapter{ct: models.ChannelTypeWhatsApp, msg: msg}
 
-	r.HandleMessage(context.Background(), []byte("{}"), adapter)
+	_ = r.HandleMessage(context.Background(), []byte("{}"), adapter)
 
 	pub.mu.Lock()
 	defer pub.mu.Unlock()
@@ -454,7 +453,7 @@ func TestRouter_CollectModeBatching(t *testing.T) {
 		msg.Content.Text = ""
 		msg.MessageID = ""
 		adapter := &mockAdapter{ct: models.ChannelTypeWhatsApp, msg: msg}
-		r.HandleMessage(context.Background(), []byte("{}"), adapter)
+		_ = r.HandleMessage(context.Background(), []byte("{}"), adapter)
 	}
 
 	// Cap reached should trigger flush — give it a moment.
@@ -478,7 +477,7 @@ func TestRouter_QueueItemSerialisable(t *testing.T) {
 	defer r.dedup.Stop()
 
 	adapter := &mockAdapter{ct: models.ChannelTypeWhatsApp, msg: newWhatsAppMsg()}
-	r.HandleMessage(context.Background(), []byte("{}"), adapter)
+	_ = r.HandleMessage(context.Background(), []byte("{}"), adapter)
 
 	pub.mu.Lock()
 	defer pub.mu.Unlock()

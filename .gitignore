@@ -6,9 +6,6 @@ coverage/
 *.out
 *.html
 
-# Go cache
-go.sum
-
 # IDE
 .idea/
 .vscode/

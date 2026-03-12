@@ -5,8 +5,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/agent/sandbox"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/sandbox"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 func TestNewManager(t *testing.T) {

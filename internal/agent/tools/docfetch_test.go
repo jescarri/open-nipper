@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-nipper/open-nipper/internal/agent/registration"
-	"github.com/open-nipper/open-nipper/internal/agent/tools"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/registration"
+	"github.com/jescarri/open-nipper/internal/agent/tools"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 func newTestExecutor() *tools.DocFetchExecutor {
@@ -24,7 +24,7 @@ func newProdExecutor() *tools.DocFetchExecutor {
 func TestDocFetch_PlainText(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("Hello from a plain text document."))
+		_, _ = w.Write([]byte("Hello from a plain text document."))
 	}))
 	defer srv.Close()
 
@@ -46,7 +46,7 @@ func TestDocFetch_PlainText(t *testing.T) {
 func TestDocFetch_Markdown(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/markdown")
-		w.Write([]byte("# Title\n\nSome **bold** text."))
+		_, _ = w.Write([]byte("# Title\n\nSome **bold** text."))
 	}))
 	defer srv.Close()
 
@@ -62,7 +62,7 @@ func TestDocFetch_Markdown(t *testing.T) {
 func TestDocFetch_HTML(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(`<!DOCTYPE html>
+		_, _ = w.Write([]byte(`<!DOCTYPE html>
 <html><head><title>Test Doc</title></head>
 <body><h1>Document</h1><p>This is a test HTML document for parsing.</p></body>
 </html>`))
@@ -84,7 +84,7 @@ func TestDocFetch_HTML(t *testing.T) {
 func TestDocFetch_JSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"key": "value", "nested": {"a": 1}}`))
+		_, _ = w.Write([]byte(`{"key": "value", "nested": {"a": 1}}`))
 	}))
 	defer srv.Close()
 
@@ -100,7 +100,7 @@ func TestDocFetch_JSON(t *testing.T) {
 func TestDocFetch_ImageNoEXIF(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10}) // minimal JPEG, no EXIF
+		_, _ = w.Write([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10}) // minimal JPEG, no EXIF
 	}))
 	defer srv.Close()
 
@@ -119,7 +119,7 @@ func TestDocFetch_ImageNoEXIF(t *testing.T) {
 func TestDocFetch_AudioReturnsMetadata(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "audio/ogg")
-		w.Write([]byte("OggS....fake audio data"))
+		_, _ = w.Write([]byte("OggS....fake audio data"))
 	}))
 	defer srv.Close()
 
@@ -138,7 +138,7 @@ func TestDocFetch_AudioReturnsMetadata(t *testing.T) {
 func TestDocFetch_VideoReturnsMetadata(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
-		w.Write([]byte("fake video data"))
+		_, _ = w.Write([]byte("fake video data"))
 	}))
 	defer srv.Close()
 
@@ -157,7 +157,7 @@ func TestDocFetch_VideoReturnsMetadata(t *testing.T) {
 func TestDocFetch_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	}))
 	defer srv.Close()
 
@@ -252,7 +252,7 @@ func TestDocFetch_InternalDomainRejected(t *testing.T) {
 func TestDocFetch_Timeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
-		w.Write([]byte("too slow"))
+		_, _ = w.Write([]byte("too slow"))
 	}))
 	defer srv.Close()
 
@@ -450,7 +450,7 @@ func TestDocFetch_LargeContentTruncated(t *testing.T) {
 	bigContent := strings.Repeat("A", 300*1024) // 300 KB
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(bigContent))
+		_, _ = w.Write([]byte(bigContent))
 	}))
 	defer srv.Close()
 
@@ -467,7 +467,7 @@ func TestDocFetch_PDFMagicBytes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/pdf")
 		// Not a real PDF, so parsing will fail gracefully
-		w.Write([]byte("%PDF-1.4 fake content"))
+		_, _ = w.Write([]byte("%PDF-1.4 fake content"))
 	}))
 	defer srv.Close()
 
@@ -503,7 +503,7 @@ func TestDocFetch_ImageWithEXIF(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write(buf)
+		_, _ = w.Write(buf)
 	}))
 	defer srv.Close()
 

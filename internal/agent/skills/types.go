@@ -50,3 +50,9 @@ func (s *Skill) IsMCPOnly() bool {
 	}
 	return s.Config.Type == SkillTypeMCP
 }
+
+// RequiresSandbox returns true if this skill needs a Docker sandbox to execute.
+// MCP-only skills do not require a sandbox; all other skills (script type) do.
+func (s *Skill) RequiresSandbox() bool {
+	return !s.IsMCPOnly()
+}

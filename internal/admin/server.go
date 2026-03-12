@@ -13,10 +13,10 @@ import (
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/datastore"
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/internal/queue"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/datastore"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/queue"
 )
 
 // AgentHealthProvider supplies cached agent health data to the admin health endpoint.

@@ -33,13 +33,15 @@ func (a *requestTokenAccumulator) Totals() (prompt, completion int, steps int, l
 
 // SessionUsage tracks cumulative token usage and cost for a session.
 type SessionUsage struct {
-	TotalInputTokens  int       `json:"totalInputTokens"`
-	TotalOutputTokens int       `json:"totalOutputTokens"`
-	TotalRequests     int       `json:"totalRequests"`
-	EstimatedCostUSD  float64   `json:"estimatedCostUsd"`
-	ContextWindowSize int       `json:"contextWindowSize"`
-	LastUsagePercent  float64   `json:"lastUsagePercent"`
-	StartedAt         time.Time `json:"startedAt"`
+	TotalInputTokens       int       `json:"totalInputTokens"`
+	TotalOutputTokens      int       `json:"totalOutputTokens"`
+	TotalRequests          int       `json:"totalRequests"`
+	EstimatedCostUSD       float64   `json:"estimatedCostUsd"`
+	ContextWindowSize      int       `json:"contextWindowSize"`
+	LastUsagePercent       float64   `json:"lastUsagePercent"`
+	LastPromptTokens       int       `json:"lastPromptTokens"`       // prompt size of the most recent LLM call (last ReAct step)
+	LastRequestInputTokens int       `json:"lastRequestInputTokens"` // total prompt tokens for the last request (all ReAct steps); used for compaction
+	StartedAt              time.Time `json:"startedAt"`
 }
 
 // UsageTracker maintains per-session LLM usage statistics.
@@ -80,11 +82,13 @@ func (t *UsageTracker) Record(sessionKey string, inputTokens, outputTokens, last
 	usage.TotalRequests++
 	usage.EstimatedCostUSD += estimateCost(t.model, inputTokens, outputTokens)
 
+	// Aggregate for this request (all ReAct steps); used for compaction threshold.
+	usage.LastRequestInputTokens = inputTokens
+
 	if t.contextWindowMax > 0 {
 		usage.ContextWindowSize = t.contextWindowMax
+		usage.LastPromptTokens = lastPromptTokens
 		// Context fill = last call's prompt tokens / context window.
-		// The last call's prompt includes the full conversation + system prompt +
-		// tool definitions, so it's the best indicator of how full the window is.
 		usage.LastUsagePercent = (float64(lastPromptTokens) / float64(t.contextWindowMax)) * 100.0
 		if usage.LastUsagePercent > 100.0 {
 			usage.LastUsagePercent = 100.0
@@ -138,44 +142,50 @@ func (t *UsageTracker) FormatUsage(sessionKey string) string {
 	return sb.String()
 }
 
-// FormatResponseFooter returns a compact footer with completion time, token
-// counts, tokens/second, context fill, and estimated cost. Used when the
-// user's skill level is above intermediate. Plain text so it works on any channel.
+// FormatResponseFooter returns a compact footer with generation time, token
+// counts, steps, tokens/second, context fill with compaction threshold, and
+// estimated cost.
 //
 // promptTokens and completionTokens are the accumulated totals across all
 // ReAct steps. steps is the number of LLM calls. lastPromptTokens is the
 // prompt size of the final LLM call (context fill indicator). contextWindowMax
-// is the model's context window (0 = unknown).
-func FormatResponseFooter(model string, promptTokens, completionTokens, steps, lastPromptTokens, contextWindowMax int, elapsed time.Duration) string {
-	total := promptTokens + completionTokens
-	if total == 0 {
-		return ""
-	}
+// is the model's context window (0 = unknown). compactionThresholdPct is the
+// auto-compaction trigger percentage (e.g. 60 means compaction fires at 60%).
+func FormatResponseFooter(model string, promptTokens, completionTokens, steps, lastPromptTokens, contextWindowMax, compactionThresholdPct int, elapsed time.Duration) string {
 	secs := elapsed.Seconds()
-	var tokPerSec float64
-	if secs > 0 && completionTokens > 0 {
-		tokPerSec = float64(completionTokens) / secs
-	}
-	cost := estimateCost(model, promptTokens, completionTokens)
+	total := promptTokens + completionTokens
 
 	var sb strings.Builder
 	sb.WriteString("\n\n—\n")
-	sb.WriteString(fmt.Sprintf("Completion: %.2f s · Tokens: %d (in: %d, out: %d)", secs, total, promptTokens, completionTokens))
-	if steps > 1 {
-		sb.WriteString(fmt.Sprintf(" · %d steps", steps))
-	}
-	if tokPerSec > 0 {
-		sb.WriteString(fmt.Sprintf(" · %.0f tok/s", tokPerSec))
-	}
-	if contextWindowMax > 0 && lastPromptTokens > 0 {
-		pct := float64(lastPromptTokens) / float64(contextWindowMax) * 100.0
-		sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%", pct))
-	}
-	if cost > 0 {
-		sb.WriteString(fmt.Sprintf(" · Est. $%.6f USD", cost))
+	sb.WriteString(fmt.Sprintf("%.2fs", secs))
+	if total > 0 {
+		var tokPerSec float64
+		if secs > 0 && completionTokens > 0 {
+			tokPerSec = float64(completionTokens) / secs
+		}
+		cost := estimateCost(model, promptTokens, completionTokens)
+		sb.WriteString(fmt.Sprintf(" · %d tokens (in: %d, out: %d)", total, promptTokens, completionTokens))
+		if steps > 1 {
+			sb.WriteString(fmt.Sprintf(" · %d steps", steps))
+		}
+		if tokPerSec > 0 {
+			sb.WriteString(fmt.Sprintf(" · %.0f tok/s", tokPerSec))
+		}
+		if contextWindowMax > 0 && lastPromptTokens > 0 {
+			fillPct := float64(lastPromptTokens) / float64(contextWindowMax) * 100.0
+			if compactionThresholdPct > 0 {
+				sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%/%d%%", fillPct, compactionThresholdPct))
+			} else {
+				sb.WriteString(fmt.Sprintf(" · Ctx: %.0f%%", fillPct))
+			}
+		}
+		if cost > 0 {
+			sb.WriteString(fmt.Sprintf(" · $%.4f", cost))
+		}
 	}
 	return sb.String()
 }
+
 
 // modelCostPerToken maps model names/prefixes to (input, output) costs per token in USD.
 // Prices as of early 2026.

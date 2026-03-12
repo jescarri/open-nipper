@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/models"
-	pkgsess "github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/internal/models"
+	pkgsess "github.com/jescarri/open-nipper/pkg/session"
 )
 
 // Resolver determines the session key for an inbound NipperMessage.

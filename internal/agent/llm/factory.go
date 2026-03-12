@@ -11,7 +11,7 @@ import (
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	einoollama "github.com/cloudwego/eino-ext/components/model/ollama"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 const defaultInferenceTimeoutSeconds = 120
@@ -29,7 +29,7 @@ const defaultInferenceTimeoutSeconds = 120
 // OpenAI-compatible API (/v1/chat/completions). Use provider "local" (or
 // any alias above) with base_url pointing to the server. The "ollama"
 // provider is reserved for Ollama's native /api/chat endpoint.
-func NewChatModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatModel, error) {
+func NewChatModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatModel, error) { //nolint:staticcheck // SA1019: return ChatModel for compatibility
 	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
 	case "ollama":
 		return newOllamaModel(ctx, cfg)
@@ -40,7 +40,7 @@ func NewChatModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatMo
 	}
 }
 
-func newOpenAIModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatModel, error) {
+func newOpenAIModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatModel, error) { //nolint:staticcheck // SA1019: ChatModel deprecated
 	apiKey := cfg.APIKey
 	if apiKey == "" {
 		if isLocalCompatEndpoint(cfg.BaseURL) {
@@ -85,6 +85,10 @@ func newOpenAIModel(ctx context.Context, cfg config.InferenceConfig) (model.Chat
 		ocfg.FrequencyPenalty = &fp
 	}
 
+	if len(cfg.StopTokens) > 0 {
+		ocfg.Stop = cfg.StopTokens
+	}
+
 	// MaxTokens vs MaxCompletionTokens:
 	// OpenAI deprecated max_tokens in favor of max_completion_tokens for newer models.
 	// Reasoning models require max_completion_tokens; older models accept both.
@@ -109,7 +113,7 @@ func newOpenAIModel(ctx context.Context, cfg config.InferenceConfig) (model.Chat
 // newLocalModel creates an OpenAI-compatible model for local inference
 // servers (LM Studio, vLLM, LocalAI, text-generation-inference).
 // api_key is optional (defaults to "local"), base_url is required.
-func newLocalModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatModel, error) {
+func newLocalModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatModel, error) { //nolint:staticcheck // SA1019: ChatModel deprecated
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("inference.base_url is required for provider %q (e.g. http://localhost:1234/v1)", cfg.Provider)
 	}
@@ -120,7 +124,7 @@ func newLocalModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatM
 	return newOpenAIModel(ctx, localCfg)
 }
 
-func newOllamaModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatModel, error) {
+func newOllamaModel(ctx context.Context, cfg config.InferenceConfig) (model.ChatModel, error) { //nolint:staticcheck // SA1019: ChatModel deprecated
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"

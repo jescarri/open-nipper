@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // mockPublisher records publish calls and allows controlling responses.
@@ -224,7 +224,7 @@ func TestDeliverResponse_PayloadContainsParts(t *testing.T) {
 	}
 
 	var payload MQTTResponsePayload
-	json.Unmarshal(pub.published[0].Payload, &payload)
+	_ = json.Unmarshal(pub.published[0].Payload, &payload)
 	if len(payload.Parts) != 1 {
 		t.Fatalf("expected 1 part, got %d", len(payload.Parts))
 	}
@@ -241,7 +241,7 @@ func TestDeliverResponse_QoSClampedFromMeta(t *testing.T) {
 		Meta:      models.MqttMeta{QoS: 2},
 	}
 
-	dc.DeliverResponse(context.Background(), resp)
+	_ = dc.DeliverResponse(context.Background(), resp)
 	if pub.published[0].QoS != 2 {
 		t.Fatalf("expected QoS 2, got %d", pub.published[0].QoS)
 	}
@@ -258,7 +258,7 @@ func TestDeliverResponse_InvalidQoS_FallbackToDefault(t *testing.T) {
 		Meta:      models.MqttMeta{QoS: 5},
 	}
 
-	dc.DeliverResponse(context.Background(), resp)
+	_ = dc.DeliverResponse(context.Background(), resp)
 	if pub.published[0].QoS != 1 {
 		t.Fatalf("expected default QoS 1 for invalid meta QoS, got %d", pub.published[0].QoS)
 	}
@@ -283,10 +283,10 @@ func TestDeliverResponse_TimestampInRFC3339(t *testing.T) {
 		Timestamp: ts,
 	}
 
-	dc.DeliverResponse(context.Background(), resp)
+	_ = dc.DeliverResponse(context.Background(), resp)
 
 	var payload MQTTResponsePayload
-	json.Unmarshal(pub.published[0].Payload, &payload)
+	_ = json.Unmarshal(pub.published[0].Payload, &payload)
 	if payload.Timestamp != "2026-02-22T15:30:00Z" {
 		t.Fatalf("unexpected timestamp: %s", payload.Timestamp)
 	}

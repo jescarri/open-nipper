@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 func TestNormalizeS3Config(t *testing.T) {
@@ -180,7 +180,7 @@ func TestFetcher_IsS3EndpointURL_EmptyConfig(t *testing.T) {
 
 func TestFetcher_Fetch_PlainHTTP(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hello-from-http"))
+		_, _ = w.Write([]byte("hello-from-http"))
 	}))
 	defer server.Close()
 

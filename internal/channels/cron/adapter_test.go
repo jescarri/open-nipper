@@ -11,9 +11,9 @@ import (
 
 	"go.uber.org/zap"
 
-	channelpkg "github.com/open-nipper/open-nipper/internal/channels"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	channelpkg "github.com/jescarri/open-nipper/internal/channels"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // Compile-time check: Adapter implements ChannelAdapter.
@@ -61,7 +61,7 @@ func TestAdapter_Start_NoJobs(t *testing.T) {
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	a.Stop(context.Background())
+	_ = a.Stop(context.Background())
 }
 
 func TestAdapter_Start_WithValidJobs(t *testing.T) {
@@ -73,7 +73,7 @@ func TestAdapter_Start_WithValidJobs(t *testing.T) {
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer a.Stop(context.Background())
+	defer func() { _ = a.Stop(context.Background()) }()
 
 	if a.Scheduler().JobCount() != 1 {
 		t.Fatalf("expected 1 job, got %d", a.Scheduler().JobCount())
@@ -97,7 +97,7 @@ func TestAdapter_HealthCheck_AllJobsFailed(t *testing.T) {
 		Validator: validatorAlwaysOK,
 	})
 	_ = a.Start(context.Background())
-	defer a.Stop(context.Background())
+	defer func() { _ = a.Stop(context.Background()) }()
 
 	if err := a.HealthCheck(context.Background()); err == nil {
 		t.Fatal("expected health check error when all jobs fail validation")

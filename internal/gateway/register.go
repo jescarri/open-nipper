@@ -13,11 +13,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/datastore"
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/internal/queue"
-	"github.com/open-nipper/open-nipper/internal/ratelimit"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/datastore"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/queue"
+	"github.com/jescarri/open-nipper/internal/ratelimit"
 )
 
 // RegisterHandler implements POST /agents/register — the agent auto-registration endpoint.
@@ -377,7 +377,7 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // extractBearerToken pulls the token from "Authorization: Bearer <token>".
@@ -430,7 +430,7 @@ func clientIP(r *http.Request) string {
 func writeRegisterError(w http.ResponseWriter, status int, errMsg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":    false,
 		"error": errMsg,
 	})
@@ -445,7 +445,7 @@ func writeRegisterRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Retry-After", fmt.Sprintf("%d", retrySeconds))
 	w.WriteHeader(http.StatusTooManyRequests)
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":          false,
 		"error":       "rate_limited",
 		"retry_after": retrySeconds,

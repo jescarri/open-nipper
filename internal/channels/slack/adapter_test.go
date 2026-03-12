@@ -11,9 +11,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/channels"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/channels"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 func testAdapter(botToken string) *Adapter {
@@ -55,7 +55,7 @@ func TestAdapter_Stop(t *testing.T) {
 
 func TestAdapter_HealthCheck_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(slackResponse(true, "", ""))
+		_, _ = w.Write(slackResponse(true, "", ""))
 	}))
 	defer srv.Close()
 
@@ -72,7 +72,7 @@ func TestAdapter_HealthCheck_Success(t *testing.T) {
 
 func TestAdapter_HealthCheck_Failure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(slackResponse(false, "", "invalid_auth"))
+		_, _ = w.Write(slackResponse(false, "", "invalid_auth"))
 	}))
 	defer srv.Close()
 
@@ -178,8 +178,8 @@ func TestAdapter_DeliverEvent_NilSafe(t *testing.T) {
 func TestAdapter_DeliverResponse_PostMessage(t *testing.T) {
 	var capturedPayload map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&capturedPayload)
-		w.Write(slackResponse(true, "99.88", ""))
+		_ = json.NewDecoder(r.Body).Decode(&capturedPayload)
+		_, _ = w.Write(slackResponse(true, "99.88", ""))
 	}))
 	defer srv.Close()
 
@@ -254,12 +254,6 @@ func TestValidate_MissingSigningSecret(t *testing.T) {
 // Since they're in the same package, we can use it directly.
 // (The type is already declared in delivery_test.go)
 
-func makeSlackAPIServer(response []byte) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(response)
-	}))
-}
-
 func TestAdapter_SlackClientRef(t *testing.T) {
 	a := testAdapter("xoxb-test")
 	if a.SlackClientRef() == nil {
@@ -270,8 +264,8 @@ func TestAdapter_SlackClientRef(t *testing.T) {
 func TestDeliverEvent_ErrorEvent_PostsWarning(t *testing.T) {
 	var capturedPayload map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&capturedPayload)
-		w.Write(slackResponse(true, "err.msg.ts", ""))
+		_ = json.NewDecoder(r.Body).Decode(&capturedPayload)
+		_, _ = w.Write(slackResponse(true, "err.msg.ts", ""))
 	}))
 	defer srv.Close()
 

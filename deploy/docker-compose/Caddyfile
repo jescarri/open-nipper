@@ -1,0 +1,64 @@
+# Open-Nipper Caddy reverse proxy configuration.
+#
+# TLS is handled automatically by Caddy via Let's Encrypt.
+# DNS-01 challenge with AWS Route53 is used for certificate issuance.
+#
+# Required environment variables (set in .env.caddy):
+#   NIPPER_HOSTNAME        - public hostname (e.g. nipper.example.com)
+#   AWS_ACCESS_KEY_ID      - Route53 credentials for DNS-01 challenge
+#   AWS_SECRET_ACCESS_KEY  - Route53 credentials for DNS-01 challenge
+#   AWS_REGION             - AWS region (e.g. us-east-1)
+#   AWS_HOSTED_ZONE_ID     - Route53 hosted zone ID
+
+# Redirect HTTP to HTTPS
+http://{$NIPPER_HOSTNAME} {
+	redir https://{$NIPPER_HOSTNAME}{uri} permanent
+}
+
+https://{$NIPPER_HOSTNAME} {
+	tls {
+		dns route53 {
+			access_key_id {$AWS_ACCESS_KEY_ID}
+			secret_access_key {$AWS_SECRET_ACCESS_KEY}
+			region {$AWS_REGION}
+			hosted_zone_id {$AWS_HOSTED_ZONE_ID}
+		}
+	}
+
+	# Gateway API (webhooks, agent registration, health)
+	reverse_proxy gateway:18789
+
+	# Gateway Prometheus metrics
+	handle /gateway/metrics {
+		uri strip_prefix /gateway
+		reverse_proxy gateway:18789
+	}
+}
+
+# Admin API — only accessible via internal Docker network.
+# Expose externally only if you know what you're doing.
+https://{$NIPPER_HOSTNAME}:18790 {
+	tls {
+		dns route53 {
+			access_key_id {$AWS_ACCESS_KEY_ID}
+			secret_access_key {$AWS_SECRET_ACCESS_KEY}
+			region {$AWS_REGION}
+			hosted_zone_id {$AWS_HOSTED_ZONE_ID}
+		}
+	}
+
+	reverse_proxy gateway:18790
+}
+
+# Agent Prometheus metrics (optional — uncomment if you need external scraping)
+# https://{$NIPPER_HOSTNAME}:9091 {
+# 	tls {
+# 		dns route53 {
+# 			access_key_id {$AWS_ACCESS_KEY_ID}
+# 			secret_access_key {$AWS_SECRET_ACCESS_KEY}
+# 			region {$AWS_REGION}
+# 			hosted_zone_id {$AWS_HOSTED_ZONE_ID}
+# 		}
+# 	}
+# 	reverse_proxy agent:9091
+# }

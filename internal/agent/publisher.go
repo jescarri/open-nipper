@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/google/uuid"
-	"github.com/open-nipper/open-nipper/internal/agent/registration"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/agent/registration"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // EventPublisher publishes NipperEvent messages to the Gateway events exchange.

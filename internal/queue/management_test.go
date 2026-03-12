@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // rawRouter routes requests by matching "METHOD rawPath" against the request URI.
@@ -76,7 +76,7 @@ func TestManagement_CreateUser_SendsPUTWithCredentials(t *testing.T) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		gotAuthUser, gotAuthPass, _ = r.BasicAuth()
-		json.NewDecoder(r.Body).Decode(&gotPayload)
+		_ = json.NewDecoder(r.Body).Decode(&gotPayload)
 		w.WriteHeader(http.StatusCreated)
 	})
 
@@ -104,7 +104,7 @@ func TestManagement_CreateUser_ErrorOn4xx(t *testing.T) {
 	router := newRawRouter()
 	router.handle(http.MethodPut, "/api/users/bad-user", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":"bad request"}`))
+		_, _ = w.Write([]byte(`{"error":"bad request"}`))
 	})
 
 	client, _ := newTestManagementClient(t, router)
@@ -159,7 +159,7 @@ func TestManagement_SetVhostPermissions(t *testing.T) {
 
 	router := newRawRouter()
 	router.handle(http.MethodPut, "/api/permissions/%2Fnipper/agent-carol", func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotPayload)
+		_ = json.NewDecoder(r.Body).Decode(&gotPayload)
 		w.WriteHeader(http.StatusCreated)
 	})
 
@@ -197,7 +197,7 @@ func TestManagement_GetQueueInfo(t *testing.T) {
 
 	router := newRawRouter()
 	router.handle(http.MethodGet, "/api/queues/%2Fnipper/nipper-agent-user-01", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(info)
+		_ = json.NewEncoder(w).Encode(info)
 	})
 
 	client, _ := newTestManagementClient(t, router)
@@ -243,7 +243,7 @@ func TestManagement_ListQueues(t *testing.T) {
 
 	router := newRawRouter()
 	router.handle(http.MethodGet, "/api/queues/%2Fnipper", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(queues)
+		_ = json.NewEncoder(w).Encode(queues)
 	})
 
 	client, _ := newTestManagementClient(t, router)

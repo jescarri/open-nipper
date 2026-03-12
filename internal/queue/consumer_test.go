@@ -11,7 +11,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // mockAcknowledger records ack/nack calls for test assertions.
@@ -60,12 +60,6 @@ func consumerWithHandler(handler EventHandler) *RabbitMQConsumer {
 		handler: handler,
 		stopCh:  make(chan struct{}),
 	}
-	return c
-}
-
-// consumerWithChannel creates a consumer that reads from deliveryCh.
-func consumerWithChannel(handler EventHandler, deliveryCh <-chan amqp.Delivery) *RabbitMQConsumer {
-	c := consumerWithHandler(handler)
 	return c
 }
 

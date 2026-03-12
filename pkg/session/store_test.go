@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 func newStore(t *testing.T) *session.Store {
@@ -138,9 +138,12 @@ func TestListSessions_ReturnsAllSessions(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 
-	store.CreateSession(ctx, makeReq("dave", "slack"))
-	store.CreateSession(ctx, makeReq("dave", "whatsapp"))
-
+	if _, err := store.CreateSession(ctx, makeReq("dave", "slack")); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := store.CreateSession(ctx, makeReq("dave", "whatsapp")); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 	sessions, err := store.ListSessions(ctx, "dave")
 	if err != nil {
 		t.Fatalf("ListSessions error: %v", err)
@@ -368,9 +371,12 @@ func TestUpdateIndex_RebuildFromMetaFiles(t *testing.T) {
 	base := t.TempDir()
 	store2 := session.NewStore(base, zaptest.NewLogger(t))
 
-	store2.CreateSession(ctx, makeReq("mia", "slack"))
-	store2.CreateSession(ctx, makeReq("mia", "whatsapp"))
-
+	if _, err := store2.CreateSession(ctx, makeReq("mia", "slack")); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := store2.CreateSession(ctx, makeReq("mia", "whatsapp")); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 	if err := store2.UpdateIndex(ctx, "mia"); err != nil {
 		t.Fatalf("UpdateIndex error: %v", err)
 	}

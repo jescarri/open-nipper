@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,20 +18,25 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	niagent "github.com/open-nipper/open-nipper/internal/agent"
-	"github.com/open-nipper/open-nipper/internal/agent/enrich"
-	"github.com/open-nipper/open-nipper/internal/agent/llm"
-	agentmcp "github.com/open-nipper/open-nipper/internal/agent/mcp"
-	agentmemory "github.com/open-nipper/open-nipper/internal/agent/memory"
-	"github.com/open-nipper/open-nipper/internal/agent/registration"
-	"github.com/open-nipper/open-nipper/internal/agent/sandbox"
-	"github.com/open-nipper/open-nipper/internal/agent/skills"
-	"github.com/open-nipper/open-nipper/internal/agent/tools"
-	"github.com/open-nipper/open-nipper/internal/config"
-	nlogger "github.com/open-nipper/open-nipper/internal/logger"
-	"github.com/open-nipper/open-nipper/internal/telemetry"
-	"github.com/open-nipper/open-nipper/pkg/session"
+	niagent "github.com/jescarri/open-nipper/internal/agent"
+	"github.com/jescarri/open-nipper/internal/agent/enrich"
+	"github.com/jescarri/open-nipper/internal/agent/llm"
+	agentmcp "github.com/jescarri/open-nipper/internal/agent/mcp"
+	agentmemory "github.com/jescarri/open-nipper/internal/agent/memory"
+	"github.com/jescarri/open-nipper/internal/agent/registration"
+	"github.com/jescarri/open-nipper/internal/agent/sandbox"
+	"github.com/jescarri/open-nipper/internal/agent/skills"
+	"github.com/jescarri/open-nipper/internal/agent/tools"
+	"github.com/jescarri/open-nipper/internal/config"
+	nlogger "github.com/jescarri/open-nipper/internal/logger"
+	"github.com/jescarri/open-nipper/internal/telemetry"
+	"github.com/jescarri/open-nipper/pkg/session"
 	"go.opentelemetry.io/otel"
+)
+
+var (
+	agentDumpConfig     bool
+	tokenEncryptionKey  string
 )
 
 var agentCmd = &cobra.Command{
@@ -49,7 +58,21 @@ Config file:
 	RunE: runAgent,
 }
 
+func init() {
+	agentCmd.Flags().BoolVar(&agentDumpConfig, "dump-config", false, "Print default agent configuration to stdout and exit")
+	agentCmd.Flags().StringVar(&tokenEncryptionKey, "token-encryption-key", "", "Encryption key for OIDC token storage (or set OPEN_NIPPER_TOKEN_ENCRYPTION_KEY)")
+}
+
 func runAgent(cmd *cobra.Command, args []string) error {
+	if agentDumpConfig {
+		out, err := config.DumpAgentConfig()
+		if err != nil {
+			return fmt.Errorf("dumping config: %w", err)
+		}
+		fmt.Print(string(out))
+		return nil
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -274,12 +297,16 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			zap.Int("count", len(skillsLoader.Skills())),
 			zap.String("path", cfg.Skills.Path),
 		)
-		if sandboxMgr != nil {
-			secretRegistry := skills.NewProviderRegistry()
-			secretRegistry.Register(skills.NewEnvVarProvider(logger))
-			skillExecutor = skills.NewExecutor(sandboxMgr, secretRegistry, logger, niagent.NewSkillMetricsRecorder(metrics))
-			skillExecutor.UserID = reg.UserID
-		}
+		// Always create executor so skill_exec tool is registered and can
+		// return clear errors. Sandbox may be nil — script skills will be
+		// rejected at execution time with a descriptive message.
+		secretRegistry := skills.NewProviderRegistry()
+		secretRegistry.Register(skills.NewEnvVarProvider(logger))
+		skillExecutor = skills.NewExecutor(sandboxMgr, secretRegistry, logger, niagent.NewSkillMetricsRecorder(metrics))
+		skillExecutor.UserID = reg.UserID
+		// Tell the loader whether sandbox is available so script-type skills
+		// are excluded from prompts when they cannot execute.
+		skillsLoader.SetSandboxAvailable(sandboxMgr != nil)
 	}
 
 	// 9. Build tools.
@@ -303,13 +330,41 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		logger.Warn("no tools are enabled; the agent will not be able to fetch URLs or run commands — set tools.web_fetch: true in your agent config to enable web access")
 	}
 
-	// 10. Load MCP tools (if configured).
+	// 10. Resolve base path (needed for MCP token storage and session store).
+	basePath := cfg.BasePath
+	if basePath == "" {
+		basePath = defaultBasePath()
+	}
+
+	// 11. Load MCP tools (if configured).
 	// The loader manages its own keepalive and reconnection for SSE transports.
 	// Tools are resolved dynamically via the loader at each message, so the
 	// runtime always sees a fresh set even after reconnection.
 	var mcpLoader *agentmcp.Loader
 	if len(cfg.MCP) > 0 {
-		mcpLoader, err = agentmcp.NewLoader(ctx, cfg.MCP, logger)
+		// Resolve token encryption key: flag > env var.
+		encKey := tokenEncryptionKey
+		if encKey == "" {
+			encKey = os.Getenv("OPEN_NIPPER_TOKEN_ENCRYPTION_KEY")
+		}
+		// Validate: if any MCP server has OIDC auth, encryption key is required.
+		for _, mcpCfg := range cfg.MCP {
+			if mcpCfg.Auth != nil && strings.ToLower(mcpCfg.Auth.Type) == "oidc" && encKey == "" {
+				return fmt.Errorf("OIDC auth is configured for MCP server %q but no token encryption key provided; set OPEN_NIPPER_TOKEN_ENCRYPTION_KEY or --token-encryption-key", mcpCfg.Name)
+			}
+		}
+
+		// Build a notifier that sends device auth URLs to the user via the
+		// gateway's /agents/me/notify endpoint (same notification infra as cron).
+		mcpNotifier := agentmcp.DeviceAuthNotifier(func(nctx context.Context, serverName, verificationURI, userCode string, expiresIn int) {
+			msg := fmt.Sprintf("🔐 *OIDC Authentication Required* for MCP server *%s*\n\nVisit: %s\nCode: *%s*\nExpires in: %d seconds",
+				serverName, verificationURI, userCode, expiresIn)
+			if err := notifyUser(nctx, gatewayURL, authToken, msg); err != nil {
+				logger.Warn("failed to send OIDC device auth notification", zap.Error(err))
+			}
+		})
+
+		mcpLoader, err = agentmcp.NewLoader(ctx, cfg.MCP, logger, basePath, encKey, mcpNotifier)
 		if err != nil {
 			return fmt.Errorf("loading MCP tools: %w", err)
 		}
@@ -320,12 +375,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			zap.Int("baseToolCount", len(agentTools)),
 			zap.Strings("mcpToolNames", mcpLoader.ToolNames()),
 		)
-	}
-
-	// 11. Create session store.
-	basePath := cfg.BasePath
-	if basePath == "" {
-		basePath = defaultBasePath()
 	}
 	sessionStore := session.NewStore(basePath, logger)
 	logger.Info("session store ready", zap.String("basePath", basePath))
@@ -422,6 +471,33 @@ func buildAMQPURL(rmq registration.RMQConfig) (string, error) {
 		u.RawPath = "/" + url.PathEscape(rmq.VHost)
 	}
 	return u.String(), nil
+}
+
+// notifyUser sends a message to the user through the gateway's notification endpoint.
+// Uses the same auth + channel resolution infrastructure as cron/at jobs.
+func notifyUser(ctx context.Context, gatewayURL, authToken, message string) error {
+	body, err := json.Marshal(map[string]string{"message": message})
+	if err != nil {
+		return fmt.Errorf("marshalling notify request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", gatewayURL+"/agents/me/notify", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating notify request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("sending notification: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("notification endpoint returned %s", resp.Status)
+	}
+	return nil
 }
 
 // defaultBasePath returns $HOME/.open-nipper for session/memory store when config base_path is empty.

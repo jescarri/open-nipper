@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/models"
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 // CommandAction describes the side-effect of a handled command.
@@ -114,7 +114,7 @@ func (r *Runtime) cmdNewSession(ctx context.Context, msg *models.NipperMessage) 
 		model = r.reg.User.DefaultModel
 	}
 
-	_, err := r.sessions.CreateSession(ctx, session.CreateSessionRequest{
+	sess, err := r.sessions.CreateSession(ctx, session.CreateSessionRequest{
 		UserID:      userID,
 		SessionID:   sessionID,
 		ChannelType: channelType,
@@ -128,9 +128,13 @@ func (r *Runtime) cmdNewSession(ctx context.Context, msg *models.NipperMessage) 
 		}
 	}
 
-	// Clear usage tracking for this session.
+	// Clear usage tracking so the counter resets. Reset both keys so we clear
+	// usage whether the next message uses the incoming key or the store's key.
 	if r.usageTracker != nil {
 		r.usageTracker.Reset(sessionKey)
+		if sess != nil && sess.Key != sessionKey {
+			r.usageTracker.Reset(sess.Key)
+		}
 	}
 
 	r.logger.Info("session cleared via /new command",

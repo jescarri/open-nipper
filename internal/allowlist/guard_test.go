@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
-	"github.com/open-nipper/open-nipper/internal/allowlist"
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/allowlist"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // ---- minimal stub repository -----------------------------------------------

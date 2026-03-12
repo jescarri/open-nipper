@@ -1,6 +1,6 @@
 package telemetry
 
-import "github.com/open-nipper/open-nipper/internal/config"
+import "github.com/jescarri/open-nipper/internal/config"
 
 func newDisabledTracingConfig() config.TracingConfig {
 	return config.TracingConfig{

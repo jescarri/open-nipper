@@ -101,7 +101,9 @@ func TestLoad_EnvPlaceholderResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Remove(tmp.Name())
-	tmp.WriteString(content)
+	if _, err := tmp.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
 	tmp.Close()
 
 	cfg, err := Load(tmp.Name())

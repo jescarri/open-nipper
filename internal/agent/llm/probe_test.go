@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/open-nipper/open-nipper/internal/agent/llm"
-	"github.com/open-nipper/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/agent/llm"
+	"github.com/jescarri/open-nipper/internal/config"
 )
 
 // lmStudioModelList mimics the LM Studio /v1/models response.
@@ -37,7 +37,7 @@ func TestProbeModelCapabilities_ListEndpoint(t *testing.T) {
 			http.NotFound(w, r)
 		case "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(lmStudioModelList)
+			_ = json.NewEncoder(w).Encode(lmStudioModelList)
 		default:
 			http.NotFound(w, r)
 		}
@@ -79,7 +79,7 @@ func TestProbeModelCapabilities_ModelEndpoint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models/mymodel" {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id":                 "mymodel",
 				"object":             "model",
 				"max_context_length": 8192,
@@ -107,6 +107,133 @@ func TestProbeModelCapabilities_ModelEndpoint(t *testing.T) {
 	}
 	if cap.State != "loaded" {
 		t.Errorf("expected loaded, got %q", cap.State)
+	}
+}
+
+// llamaCppStyleList mimics a /models response with data[].meta.n_ctx_train (llama.cpp / identitylabs style).
+var llamaCppStyleList = map[string]any{
+	"object": "list",
+	"data": []map[string]any{
+		{
+			"id":     "Qwen3-Next-80B-A3B-Instruct-UD-Q8_K_XL-00001-of-00002.gguf",
+			"object": "model",
+			"meta": map[string]any{
+				"n_ctx_train": 262144,
+				"n_vocab":     151936,
+			},
+		},
+	},
+}
+
+func TestProbeModelCapabilities_MetaNCtxTrain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(llamaCppStyleList)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := config.InferenceConfig{
+		Provider: "local",
+		Model:    "Qwen3-Next-80B-A3B-Instruct-UD-Q8_K_XL-00001-of-00002.gguf",
+		BaseURL:  srv.URL + "/v1",
+		APIKey:   "local",
+	}
+
+	cap, err := llm.ProbeModelCapabilities(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.MaxContextLength != 262144 {
+		t.Errorf("expected MaxContextLength 262144 from meta.n_ctx_train, got %d", cap.MaxContextLength)
+	}
+}
+
+func TestProbeModelCapabilities_PropsEndpoint(t *testing.T) {
+	propsBody := map[string]any{
+		"default_generation_settings": map[string]any{
+			"n_ctx": 131072,
+		},
+		"model_alias": "gpt-oss-120b-F16.gguf",
+		"model_path": "/models/gpt-oss-120b-F16.gguf",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/props" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(propsBody)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := config.InferenceConfig{
+		Provider: "local",
+		Model:    "gpt-oss-120b-F16.gguf",
+		BaseURL:  srv.URL + "/v1",
+		APIKey:   "local",
+	}
+
+	cap, err := llm.ProbeModelCapabilities(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.MaxContextLength != 131072 {
+		t.Errorf("expected MaxContextLength 131072 from /props n_ctx, got %d", cap.MaxContextLength)
+	}
+	if cap.ID != "gpt-oss-120b-F16.gguf" {
+		t.Errorf("expected ID gpt-oss-120b-F16.gguf from model_alias, got %q", cap.ID)
+	}
+	if cap.Source != "GET /props" {
+		t.Errorf("expected Source GET /props, got %q", cap.Source)
+	}
+	if cap.State != "" || cap.Architecture != "" || cap.Quantization != "" {
+		t.Errorf("props does not set state/arch/quantization; got state=%q arch=%q quant=%q", cap.State, cap.Architecture, cap.Quantization)
+	}
+}
+
+func TestProbeModelCapabilities_PropsFallback(t *testing.T) {
+	// Server has no /props (404); /v1/models returns one model. Probe should fall back to /models.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/props":
+			http.NotFound(w, r)
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "list",
+				"data": []map[string]any{
+					{"id": "fallback-model", "object": "model", "max_context_length": 8192},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := config.InferenceConfig{
+		Provider: "local",
+		Model:    "fallback-model",
+		BaseURL:  srv.URL + "/v1",
+		APIKey:   "local",
+	}
+
+	cap, err := llm.ProbeModelCapabilities(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap.Source != "GET /models" {
+		t.Errorf("expected fallback Source GET /models, got %q", cap.Source)
+	}
+	if cap.MaxContextLength != 8192 {
+		t.Errorf("expected MaxContextLength 8192 from fallback, got %d", cap.MaxContextLength)
+	}
+	if cap.ID != "fallback-model" {
+		t.Errorf("expected ID fallback-model, got %q", cap.ID)
 	}
 }
 
@@ -140,7 +267,7 @@ func TestProbeModelCapabilities_ModelNotInList(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/models":
 			// Return a list that does NOT contain the requested model.
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data": []map[string]any{
 					{"id": "other-model", "object": "model"},
 					{"id": "another-model", "object": "model"},

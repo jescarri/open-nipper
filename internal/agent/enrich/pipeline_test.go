@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 // mockEnricher is a test enricher that returns a fixed transcript.

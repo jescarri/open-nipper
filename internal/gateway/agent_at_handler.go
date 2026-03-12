@@ -11,8 +11,8 @@ import (
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/config"
-	"github.com/open-nipper/open-nipper/internal/datastore"
+	"github.com/jescarri/open-nipper/internal/config"
+	"github.com/jescarri/open-nipper/internal/datastore"
 )
 
 // AtJobMutator adds/removes at jobs at runtime (implemented by cron.Adapter).

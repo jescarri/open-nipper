@@ -3,7 +3,7 @@ package session_test
 import (
 	"testing"
 
-	"github.com/open-nipper/open-nipper/pkg/session"
+	"github.com/jescarri/open-nipper/pkg/session"
 )
 
 func TestParseSessionKey_Valid(t *testing.T) {

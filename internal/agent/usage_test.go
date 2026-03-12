@@ -133,13 +133,13 @@ func TestUsageTrackerMultipleSessions(t *testing.T) {
 }
 
 func TestFormatResponseFooter(t *testing.T) {
-	// Single step: steps=1, lastPromptTokens=800, contextWindow=128000
-	footer := FormatResponseFooter("gpt-4o", 800, 400, 1, 800, 128000, 2*time.Second)
+	// Single step, compaction threshold 60%
+	footer := FormatResponseFooter("gpt-4o", 800, 400, 1, 800, 128000, 60, 2*time.Second)
 	if footer == "" {
 		t.Fatal("expected non-empty footer")
 	}
-	if !strings.Contains(footer, "2.00 s") {
-		t.Errorf("expected completion time (2.00 s) in footer, got: %s", footer)
+	if !strings.Contains(footer, "2.00s") {
+		t.Errorf("expected completion time (2.00s) in footer, got: %s", footer)
 	}
 	if !strings.Contains(footer, "1200") {
 		t.Errorf("expected total tokens 1200 in footer, got: %s", footer)
@@ -150,29 +150,50 @@ func TestFormatResponseFooter(t *testing.T) {
 	if !strings.Contains(footer, "tok/s") {
 		t.Errorf("expected tok/s in footer, got: %s", footer)
 	}
+	// Should show fill%/threshold% format
 	if !strings.Contains(footer, "Ctx:") {
-		t.Errorf("expected context percentage in footer, got: %s", footer)
+		t.Errorf("expected Ctx: in footer, got: %s", footer)
+	}
+	if !strings.Contains(footer, "/60%") {
+		t.Errorf("expected compaction threshold /60%% in footer, got: %s", footer)
 	}
 }
 
 func TestFormatResponseFooter_MultiStep(t *testing.T) {
-	footer := FormatResponseFooter("gpt-4o", 2000, 800, 3, 1500, 128000, 5*time.Second)
+	footer := FormatResponseFooter("gpt-4o", 2000, 800, 3, 1500, 128000, 60, 5*time.Second)
 	if !strings.Contains(footer, "3 steps") {
 		t.Errorf("expected '3 steps' in footer, got: %s", footer)
 	}
 }
 
 func TestFormatResponseFooter_ZeroTokens(t *testing.T) {
-	footer := FormatResponseFooter("gpt-4o", 0, 0, 0, 0, 128000, time.Second)
-	if footer != "" {
-		t.Errorf("expected empty footer for zero tokens, got: %q", footer)
+	footer := FormatResponseFooter("gpt-4o", 0, 0, 0, 0, 128000, 60, time.Second)
+	if footer == "" {
+		t.Fatal("expected footer with timing even when tokens are zero")
+	}
+	if !strings.Contains(footer, "1.00s") {
+		t.Errorf("expected completion time in zero-token footer, got: %s", footer)
+	}
+	if strings.Contains(footer, "tokens") {
+		t.Errorf("expected no token counts in zero-token footer, got: %s", footer)
 	}
 }
 
 func TestFormatResponseFooter_LocalModel(t *testing.T) {
 	// Local model: no cost should appear.
-	footer := FormatResponseFooter("my-local-llama", 500, 200, 1, 500, 32000, 3*time.Second)
-	if strings.Contains(footer, "USD") {
-		t.Errorf("expected no USD cost for local model, got: %s", footer)
+	footer := FormatResponseFooter("my-local-llama", 500, 200, 1, 500, 32000, 60, 3*time.Second)
+	if strings.Contains(footer, "$") {
+		t.Errorf("expected no cost for local model, got: %s", footer)
+	}
+}
+
+func TestFormatResponseFooter_NoCompactionThreshold(t *testing.T) {
+	// compactionThresholdPct=0 means disabled; should show plain percentage
+	footer := FormatResponseFooter("gpt-4o", 800, 400, 1, 800, 128000, 0, 2*time.Second)
+	if !strings.Contains(footer, "Ctx:") {
+		t.Errorf("expected Ctx: in footer, got: %s", footer)
+	}
+	if strings.Contains(footer, "/0%") {
+		t.Errorf("should not show /0%% when compaction is disabled, got: %s", footer)
 	}
 }

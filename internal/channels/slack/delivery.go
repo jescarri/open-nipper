@@ -7,13 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/open-nipper/open-nipper/internal/models"
+	"github.com/jescarri/open-nipper/internal/models"
 )
 
 const (
@@ -416,16 +415,4 @@ func (s *SlackClient) StreamMessageTS(sessionKey string) (string, bool) {
 	defer s.streamMu.Unlock()
 	ts, ok := s.streamMessages[sessionKey]
 	return ts, ok
-}
-
-// tokenFromDeliveryContext attempts to extract a bot token. The event dispatch
-// path stores the token in the SlackMeta attached to the response; this helper
-// provides a fallback for events that only carry a DeliveryContext.
-func tokenFromDeliveryContext(_ models.DeliveryContext) string {
-	return ""
-}
-
-// stripMrkdwn is a placeholder for future markdown-to-mrkdwn conversion.
-func stripMrkdwn(text string) string {
-	return strings.TrimSpace(text)
 }
