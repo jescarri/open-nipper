@@ -19,7 +19,7 @@ func TestDiscover_FromWellKnown(t *testing.T) {
 			"token_endpoint":                "https://example.com/oauth/token",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -43,7 +43,7 @@ func TestDiscover_ExplicitOverrides(t *testing.T) {
 			"token_endpoint":                "https://example.com/oauth/token",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -84,7 +84,7 @@ func TestDiscover_NoIssuerNoExplicit(t *testing.T) {
 func TestDiscover_IssuerMissingEndpoints(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{})
+		_ = json.NewEncoder(w).Encode(map[string]string{})
 	}))
 	defer srv.Close()
 

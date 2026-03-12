@@ -39,7 +39,7 @@ func TestRequestDeviceCode(t *testing.T) {
 			Interval:                5,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -77,7 +77,7 @@ func TestRequestDeviceCode_WithClientSecret(t *testing.T) {
 			t.Errorf("got client_secret %q, want %q", got, "secret-123")
 		}
 		resp := DeviceAuthResponse{DeviceCode: "dc", UserCode: "UC", VerificationURI: "https://v.com", ExpiresIn: 60, Interval: 5}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -111,7 +111,7 @@ func TestExchangeDeviceCode_Success(t *testing.T) {
 			RefreshToken: "refresh-token-abc",
 			ExpiresIn:    3600,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -147,7 +147,7 @@ func TestExchangeDeviceCode_Success(t *testing.T) {
 func TestExchangeDeviceCode_AuthorizationPending(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := tokenResponse{Error: "authorization_pending"}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -169,7 +169,7 @@ func TestExchangeDeviceCode_AuthorizationPending(t *testing.T) {
 func TestExchangeDeviceCode_SlowDown(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := tokenResponse{Error: "slow_down"}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -188,7 +188,7 @@ func TestExchangeDeviceCode_SlowDown(t *testing.T) {
 func TestExchangeDeviceCode_ExpiredToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := tokenResponse{Error: "expired_token"}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -207,7 +207,7 @@ func TestExchangeDeviceCode_ExpiredToken(t *testing.T) {
 func TestExchangeDeviceCode_AccessDenied(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := tokenResponse{Error: "access_denied"}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -238,7 +238,7 @@ func TestPollForToken_SuccessAfterPending(t *testing.T) {
 				ExpiresIn:    3600,
 			}
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -279,7 +279,7 @@ func TestPollForToken_SuccessAfterPending(t *testing.T) {
 func TestPollForToken_ContextCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := tokenResponse{Error: "authorization_pending"}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 

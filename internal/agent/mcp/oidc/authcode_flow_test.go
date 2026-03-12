@@ -101,7 +101,9 @@ func TestExchangeAuthCode(t *testing.T) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		r.ParseForm()
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
 		if r.Form.Get("grant_type") != "authorization_code" {
 			t.Errorf("grant_type = %q, want authorization_code", r.Form.Get("grant_type"))
 		}
@@ -113,7 +115,7 @@ func TestExchangeAuthCode(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token":  "at-12345",
 			"token_type":    "Bearer",
 			"refresh_token": "rt-67890",
@@ -147,7 +149,7 @@ func TestRunAuthCodeFlow_Success(t *testing.T) {
 	// Fake token endpoint.
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token":  "at-flow-test",
 			"token_type":    "Bearer",
 			"refresh_token": "rt-flow-test",

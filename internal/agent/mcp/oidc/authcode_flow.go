@@ -152,7 +152,7 @@ func RunAuthCodeFlow(ctx context.Context, endpoints *OIDCEndpoints, cfg *AuthCod
 	// Shut down the temporary server.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer shutdownCancel()
-	srv.Shutdown(shutdownCtx)
+	_ = srv.Shutdown(shutdownCtx)
 
 	if result.Err != nil {
 		return nil, result.Err
