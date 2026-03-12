@@ -167,10 +167,10 @@ func TestRunAuthCodeFlow_Success(t *testing.T) {
 		Scopes:   []string{"openid"},
 	}
 
-	// Use a notifier to capture the auth URL and simulate the user opening it.
-	var capturedAuthURL string
+	// Use a channel to receive the auth URL from the notifier (avoids data race).
+	authURLCh := make(chan string, 1)
 	notifier := DeviceAuthNotifier(func(_ context.Context, _, verificationURI, _ string, _ int) {
-		capturedAuthURL = verificationURI
+		authURLCh <- verificationURI
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -187,8 +187,13 @@ func TestRunAuthCodeFlow_Success(t *testing.T) {
 		resultCh <- result{tok, err}
 	}()
 
-	// Wait a bit for the server to start and the notifier to fire.
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the notifier to fire with the auth URL.
+	var capturedAuthURL string
+	select {
+	case capturedAuthURL = <-authURLCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("notifier was not called with auth URL")
+	}
 
 	if capturedAuthURL == "" {
 		t.Fatal("notifier was not called with auth URL")
@@ -242,9 +247,9 @@ func TestRunAuthCodeFlow_StateMismatch(t *testing.T) {
 		ClientID: "test-client",
 	}
 
-	var capturedAuthURL string
+	authURLCh := make(chan string, 1)
 	notifier := DeviceAuthNotifier(func(_ context.Context, _, verificationURI, _ string, _ int) {
-		capturedAuthURL = verificationURI
+		authURLCh <- verificationURI
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -260,7 +265,12 @@ func TestRunAuthCodeFlow_StateMismatch(t *testing.T) {
 		resultCh <- result{tok, err}
 	}()
 
-	time.Sleep(200 * time.Millisecond)
+	var capturedAuthURL string
+	select {
+	case capturedAuthURL = <-authURLCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("notifier was not called with auth URL")
+	}
 
 	parsed, _ := url.Parse(capturedAuthURL)
 	redirectURI := parsed.Query().Get("redirect_uri")
