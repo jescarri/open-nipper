@@ -134,7 +134,7 @@ func TestUsageTrackerMultipleSessions(t *testing.T) {
 
 func TestFormatResponseFooter(t *testing.T) {
 	// Single step, compaction threshold 60%
-	footer := FormatResponseFooter("gpt-4o", 800, 400, 1, 800, 128000, 60, 2*time.Second)
+	footer := FormatResponseFooter("gpt-4o", 800, 400, 1, 800, 128000, 60, 2*time.Second, nil)
 	if footer == "" {
 		t.Fatal("expected non-empty footer")
 	}
@@ -160,14 +160,14 @@ func TestFormatResponseFooter(t *testing.T) {
 }
 
 func TestFormatResponseFooter_MultiStep(t *testing.T) {
-	footer := FormatResponseFooter("gpt-4o", 2000, 800, 3, 1500, 128000, 60, 5*time.Second)
+	footer := FormatResponseFooter("gpt-4o", 2000, 800, 3, 1500, 128000, 60, 5*time.Second, nil)
 	if !strings.Contains(footer, "3 steps") {
 		t.Errorf("expected '3 steps' in footer, got: %s", footer)
 	}
 }
 
 func TestFormatResponseFooter_ZeroTokens(t *testing.T) {
-	footer := FormatResponseFooter("gpt-4o", 0, 0, 0, 0, 128000, 60, time.Second)
+	footer := FormatResponseFooter("gpt-4o", 0, 0, 0, 0, 128000, 60, time.Second, nil)
 	if footer == "" {
 		t.Fatal("expected footer with timing even when tokens are zero")
 	}
@@ -181,7 +181,7 @@ func TestFormatResponseFooter_ZeroTokens(t *testing.T) {
 
 func TestFormatResponseFooter_LocalModel(t *testing.T) {
 	// Local model: no cost should appear.
-	footer := FormatResponseFooter("my-local-llama", 500, 200, 1, 500, 32000, 60, 3*time.Second)
+	footer := FormatResponseFooter("my-local-llama", 500, 200, 1, 500, 32000, 60, 3*time.Second, nil)
 	if strings.Contains(footer, "$") {
 		t.Errorf("expected no cost for local model, got: %s", footer)
 	}
@@ -189,11 +189,52 @@ func TestFormatResponseFooter_LocalModel(t *testing.T) {
 
 func TestFormatResponseFooter_NoCompactionThreshold(t *testing.T) {
 	// compactionThresholdPct=0 means disabled; should show plain percentage
-	footer := FormatResponseFooter("gpt-4o", 800, 400, 1, 800, 128000, 0, 2*time.Second)
+	footer := FormatResponseFooter("gpt-4o", 800, 400, 1, 800, 128000, 0, 2*time.Second, nil)
 	if !strings.Contains(footer, "Ctx:") {
 		t.Errorf("expected Ctx: in footer, got: %s", footer)
 	}
 	if strings.Contains(footer, "/0%") {
 		t.Errorf("should not show /0%% when compaction is disabled, got: %s", footer)
+	}
+}
+
+func TestFormatResponseFooter_WithTiming(t *testing.T) {
+	timing := &FooterTiming{
+		TTFT:               1500 * time.Millisecond,
+		GenerationDuration: 3 * time.Second,
+	}
+	footer := FormatResponseFooter("gpt-4o", 800, 300, 1, 800, 128000, 60, 5*time.Second, timing)
+	// TTFT should appear
+	if !strings.Contains(footer, "TTFT: 1.50s") {
+		t.Errorf("expected TTFT: 1.50s in footer, got: %s", footer)
+	}
+	// tok/s should use generation duration (300/3=100) not total elapsed (300/5=60)
+	if !strings.Contains(footer, "100 tok/s") {
+		t.Errorf("expected 100 tok/s (generation-based) in footer, got: %s", footer)
+	}
+}
+
+func TestRequestTokenAccumulator_Timing(t *testing.T) {
+	var accum requestTokenAccumulator
+	accum.Add(100, 50)
+	accum.AddTiming(500*time.Millisecond, 2*time.Second)
+
+	ttft, genDur := accum.LastTiming()
+	if ttft != 500*time.Millisecond {
+		t.Errorf("expected ttft=500ms, got %v", ttft)
+	}
+	if genDur != 2*time.Second {
+		t.Errorf("expected genDuration=2s, got %v", genDur)
+	}
+
+	// Second call overwrites
+	accum.Add(200, 100)
+	accum.AddTiming(300*time.Millisecond, 1*time.Second)
+	ttft, genDur = accum.LastTiming()
+	if ttft != 300*time.Millisecond {
+		t.Errorf("expected ttft=300ms after second call, got %v", ttft)
+	}
+	if genDur != 1*time.Second {
+		t.Errorf("expected genDuration=1s after second call, got %v", genDur)
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/jescarri/open-nipper/internal/agent/enrich"
+	agentllm "github.com/jescarri/open-nipper/internal/agent/llm"
 	agentmemory "github.com/jescarri/open-nipper/internal/agent/memory"
 	agentmcp "github.com/jescarri/open-nipper/internal/agent/mcp"
 	"github.com/jescarri/open-nipper/internal/agent/registration"
@@ -53,6 +54,15 @@ var (
 	agentGarbledCounter      metric.Int64Counter
 	agentTokenLeakCounter    metric.Int64Counter
 	agentRequestPromptHist   metric.Int64Histogram
+	// LLM call timing metrics
+	agentLLMCallDurationHist metric.Float64Histogram
+	agentLLMTTFTHist         metric.Float64Histogram
+	agentLLMGenerationHist   metric.Float64Histogram
+	// Phase timing metrics
+	agentHandleMessageHist   metric.Float64Histogram
+	agentSessionLoadHist     metric.Float64Histogram
+	agentToolAssemblyHist    metric.Float64Histogram
+	agentReactStepsHist      metric.Int64Histogram
 )
 
 func initAgentPromptMetrics() {
@@ -87,6 +97,42 @@ func initAgentPromptMetrics() {
 	agentRequestPromptHist, _ = meter.Int64Histogram(
 		"nipper_agent_request_prompt_tokens",
 		metric.WithDescription("Prompt tokens per request (last LLM call, representing context fill)"),
+	)
+	// LLM call timing histograms.
+	agentLLMCallDurationHist, _ = meter.Float64Histogram(
+		"nipper_agent_llm_call_duration_seconds",
+		metric.WithDescription("Total wall-clock time of a single LLM Generate call"),
+		metric.WithUnit("s"),
+	)
+	agentLLMTTFTHist, _ = meter.Float64Histogram(
+		"nipper_agent_llm_ttft_seconds",
+		metric.WithDescription("Time-to-first-token: time from request sent to first streaming chunk received (prefill/prompt processing)"),
+		metric.WithUnit("s"),
+	)
+	agentLLMGenerationHist, _ = meter.Float64Histogram(
+		"nipper_agent_llm_generation_seconds",
+		metric.WithDescription("Token generation time: time from first token to last token (decode phase)"),
+		metric.WithUnit("s"),
+	)
+	// Phase timing histograms.
+	agentHandleMessageHist, _ = meter.Float64Histogram(
+		"nipper_agent_handle_message_duration_seconds",
+		metric.WithDescription("Total wall-clock time of handleMessage (end-to-end request)"),
+		metric.WithUnit("s"),
+	)
+	agentSessionLoadHist, _ = meter.Float64Histogram(
+		"nipper_agent_session_load_duration_seconds",
+		metric.WithDescription("Duration of session load phase"),
+		metric.WithUnit("s"),
+	)
+	agentToolAssemblyHist, _ = meter.Float64Histogram(
+		"nipper_agent_tool_assembly_duration_seconds",
+		metric.WithDescription("Duration of tool assembly phase (static + MCP tools + dedup + agent init)"),
+		metric.WithUnit("s"),
+	)
+	agentReactStepsHist, _ = meter.Int64Histogram(
+		"nipper_agent_react_steps",
+		metric.WithDescription("Number of ReAct steps (LLM calls) per request"),
 	)
 }
 
@@ -480,6 +526,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	}
 
 	// 1. Load or create session.
+	sessLoadStart := time.Now()
 	sessCtx, sessSpan := tracer.Start(ctx, "agent.load_session",
 		trace.WithAttributes(attribute.String("nipper.session_key", msg.SessionKey)),
 	)
@@ -490,9 +537,19 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 		telemetry.SpanError(span, err)
 		return fmt.Errorf("loading session: %w", err)
 	}
-	sessSpan.SetAttributes(attribute.Int("session.transcript_lines", len(transcript)))
+	sessLoadDuration := time.Since(sessLoadStart)
+	sessSpan.SetAttributes(
+		attribute.Int("session.transcript_lines", len(transcript)),
+		attribute.Float64("session.load_duration_ms", float64(sessLoadDuration.Milliseconds())),
+	)
 	telemetry.SpanOK(sessSpan)
 	sessSpan.End()
+	agentPromptMetricsOnce.Do(initAgentPromptMetrics)
+	if agentSessionLoadHist != nil {
+		agentSessionLoadHist.Record(ctx, sessLoadDuration.Seconds(),
+			metric.WithAttributes(attribute.String("model", r.cfg.Inference.Model)),
+		)
+	}
 
 	// 1b. If user shared location and profile has no coordinates, save them and ask for weather.
 	var locationSavedInstruction string
@@ -591,7 +648,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	r.logger.Debug("LLM input messages",
 		zap.String("sessionKey", msg.SessionKey),
 		zap.Int("historyMessages", len(history)),
-		zap.String("userMessage", debugTruncate(userMsgText.Content, 500)),
+		zap.String("userMessage", userMsgText.Content),
 		zap.Int("userMessageMultiParts", len(userMsg.UserInputMultiContent)),
 	)
 	if inlineErr != nil {
@@ -606,7 +663,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 			zap.String("sessionKey", msg.SessionKey),
 			zap.Int("index", i),
 			zap.String("role", string(m.Role)),
-			zap.String("content", debugTruncate(m.Content, 300)),
+			zap.String("content", m.Content),
 			zap.Int("userMultiParts", len(m.UserInputMultiContent)),
 			zap.Int("assistantMultiParts", len(m.AssistantGenMultiContent)),
 		)
@@ -740,6 +797,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	ctx = tools.CronContextWithUserID(ctx, msg.UserID)
 
 	// 4. Create the Eino ReAct agent.
+	toolAssemblyStart := time.Now()
 	agentCfg := &react.AgentConfig{
 		ToolCallingModel: nil, // set below if the model supports it
 		ToolsConfig: compose.ToolsNodeConfig{
@@ -762,6 +820,14 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 		_ = publisher.PublishError(ctx, msg.SessionKey, "agent_init_error", err.Error(), true)
 		return fmt.Errorf("creating react agent: %w", err)
 	}
+	toolAssemblyDuration := time.Since(toolAssemblyStart)
+	agentPromptMetricsOnce.Do(initAgentPromptMetrics)
+	if agentToolAssemblyHist != nil {
+		agentToolAssemblyHist.Record(ctx, toolAssemblyDuration.Seconds(),
+			metric.WithAttributes(attribute.String("model", r.cfg.Inference.Model)),
+		)
+	}
+	span.SetAttributes(attribute.Float64("agent.tool_assembly_duration_ms", float64(toolAssemblyDuration.Milliseconds())))
 
 	// 5. Build tool event callback and model callback, then run the agent.
 	responseID := uuid.NewString()
@@ -775,6 +841,20 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	modelCallback := r.buildModelCallback(msg.SessionKey, publisher, &tokenAccum)
 	agentCallback := react.BuildAgentCallback(modelCallback, toolCallback)
 
+	// Log full tool schemas at debug level so the entire LLM prompt is visible.
+	toolNames := make([]string, 0, len(agentCfg.ToolsConfig.Tools))
+	for _, t := range agentCfg.ToolsConfig.Tools {
+		if info, infoErr := t.Info(ctx); infoErr == nil {
+			toolNames = append(toolNames, info.Name)
+			r.logger.Debug("LLM tool schema",
+				zap.String("sessionKey", msg.SessionKey),
+				zap.String("toolName", info.Name),
+				zap.String("description", info.Desc),
+				zap.Any("parameters", info.ParamsOneOf),
+			)
+		}
+	}
+
 	r.logger.Debug("invoking ReAct agent",
 		zap.String("sessionKey", msg.SessionKey),
 		zap.String("responseId", responseID),
@@ -782,6 +862,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 		zap.String("provider", r.cfg.Inference.Provider),
 		zap.Int("maxSteps", r.cfg.MaxSteps),
 		zap.Int("toolCount", len(agentCfg.ToolsConfig.Tools)),
+		zap.Strings("toolNames", toolNames),
 	)
 
 	const maxLLMAttempts = 3
@@ -1068,7 +1149,11 @@ generated:
 	//    skill level is above intermediate.
 	contentToFormat := result.Content
 	if profile, err := LoadProfile(r.cfg.BasePath, r.reg.UserID); err == nil && IsSkillLevelAboveIntermediate(profile.SkillLevel) {
-		footer := FormatResponseFooter(r.cfg.Inference.Model, accumPrompt, accumCompletion, accumSteps, accumLastPrompt, r.contextWindowMax, thresholdPct, time.Since(startTime))
+		var ft *FooterTiming
+		if ttft, genDur := tokenAccum.LastTiming(); ttft > 0 || genDur > 0 {
+			ft = &FooterTiming{TTFT: ttft, GenerationDuration: genDur}
+		}
+		footer := FormatResponseFooter(r.cfg.Inference.Model, accumPrompt, accumCompletion, accumSteps, accumLastPrompt, r.contextWindowMax, thresholdPct, time.Since(startTime), ft)
 		contentToFormat = result.Content + footer
 	}
 	formattedContent := r.formatForChannel(msg, contentToFormat)
@@ -1148,11 +1233,25 @@ generated:
 		)
 	}
 	span.SetAttributes(spanAttrs...)
+	// Record handle-message and react-steps histograms.
+	handleDuration := time.Since(startTime)
+	agentPromptMetricsOnce.Do(initAgentPromptMetrics)
+	if agentHandleMessageHist != nil {
+		agentHandleMessageHist.Record(ctx, handleDuration.Seconds(),
+			metric.WithAttributes(attribute.String("model", r.cfg.Inference.Model)),
+		)
+	}
+	if agentReactStepsHist != nil && accumStepsFinal > 0 {
+		agentReactStepsHist.Record(ctx, int64(accumStepsFinal),
+			metric.WithAttributes(attribute.String("model", r.cfg.Inference.Model)),
+		)
+	}
+
 	telemetry.SpanOK(span)
 	r.logger.Info("message handled",
 		zap.String("responseId", responseID),
 		zap.String("sessionKey", msg.SessionKey),
-		zap.Duration("totalDuration", time.Since(startTime)),
+		zap.Duration("totalDuration", handleDuration),
 	)
 	if r.usageTracker != nil {
 		if u := r.usageTracker.Get(msg.SessionKey); u != nil {
@@ -1599,6 +1698,13 @@ func (r *Runtime) buildToolCallback(ctx context.Context, sessionKey, responseID 
 
 // buildModelCallback constructs an Eino ModelCallbackHandler that logs LLM interactions and creates OTel spans.
 // accum accumulates token usage across all ReAct steps so the caller can report accurate totals.
+// llmCallStartKey is a context key for storing the LLM call start time.
+type llmCallStartKey struct{}
+
+// llmTimingPtrKey is a context key for storing the *LLMTiming pointer
+// so OnEnd can read TTFT/generation duration populated by StreamingGenerateModel.
+type llmTimingPtrKey struct{}
+
 func (r *Runtime) buildModelCallback(sessionKey string, publisher *EventPublisher, accum *requestTokenAccumulator) *callbackutils.ModelCallbackHandler {
 	tracer := otel.Tracer(agentTracerName)
 	return &callbackutils.ModelCallbackHandler{
@@ -1609,6 +1715,12 @@ func (r *Runtime) buildModelCallback(sessionKey string, publisher *EventPublishe
 					attribute.Int("llm.input_messages", len(input.Messages)),
 				),
 			)
+			// Store call start time and inject LLMTiming for StreamingGenerateModel.
+			cbCtx = context.WithValue(cbCtx, llmCallStartKey{}, time.Now())
+			timing := &agentllm.LLMTiming{}
+			cbCtx = agentllm.ContextWithLLMTiming(cbCtx, timing)
+			cbCtx = context.WithValue(cbCtx, llmTimingPtrKey{}, timing)
+
 			r.logger.Debug("LLM model call starting",
 				zap.String("sessionKey", sessionKey),
 				zap.String("model", info.Name),
@@ -1628,6 +1740,19 @@ func (r *Runtime) buildModelCallback(sessionKey string, publisher *EventPublishe
 			return cbCtx
 		},
 		OnEnd: func(cbCtx context.Context, info *einocallbacks.RunInfo, output *model.CallbackOutput) context.Context {
+			// Compute LLM call duration from OnStart.
+			var llmCallDuration time.Duration
+			if start, ok := cbCtx.Value(llmCallStartKey{}).(time.Time); ok {
+				llmCallDuration = time.Since(start)
+			}
+
+			// Read TTFT and generation duration from StreamingGenerateModel (if used).
+			var ttft, genDuration time.Duration
+			if timing, ok := cbCtx.Value(llmTimingPtrKey{}).(*agentllm.LLMTiming); ok && timing != nil {
+				ttft = timing.TTFT
+				genDuration = timing.GenerationDuration
+			}
+
 			// Resolve token usage: the compose framework converts *schema.Message to CallbackOutput
 			// with only Message set (TokenUsage left nil). When using StreamingGenerateModel, usage
 			// is merged into the aggregated message's ResponseMeta by ConcatMessages, so we fall
@@ -1660,6 +1785,16 @@ func (r *Runtime) buildModelCallback(sessionKey string, publisher *EventPublishe
 						attribute.String("llm.content", debugTruncate(output.Message.Content, 512)),
 					))
 				}
+				// Record timing on span.
+				span.SetAttributes(
+					attribute.Float64("llm.call_duration_ms", float64(llmCallDuration.Milliseconds())),
+				)
+				if ttft > 0 {
+					span.SetAttributes(
+						attribute.Float64("llm.ttft_ms", float64(ttft.Milliseconds())),
+						attribute.Float64("llm.generation_duration_ms", float64(genDuration.Milliseconds())),
+					)
+				}
 				telemetry.SpanOK(span)
 				span.End()
 			}
@@ -1671,6 +1806,33 @@ func (r *Runtime) buildModelCallback(sessionKey string, publisher *EventPublishe
 					zap.String("content", debugTruncate(output.Message.Content, 500)),
 					zap.Int("toolCalls", len(output.Message.ToolCalls)),
 				)
+			}
+
+			// Log timing.
+			r.logger.Info("LLM call timing",
+				zap.String("sessionKey", sessionKey),
+				zap.String("model", info.Name),
+				zap.Duration("callDuration", llmCallDuration),
+				zap.Duration("ttft", ttft),
+				zap.Duration("generationDuration", genDuration),
+			)
+
+			// Record Prometheus histograms.
+			agentPromptMetricsOnce.Do(initAgentPromptMetrics)
+			modelAttr := metric.WithAttributes(attribute.String("model", r.cfg.Inference.Model))
+			if agentLLMCallDurationHist != nil {
+				agentLLMCallDurationHist.Record(cbCtx, llmCallDuration.Seconds(), modelAttr)
+			}
+			if agentLLMTTFTHist != nil && ttft > 0 {
+				agentLLMTTFTHist.Record(cbCtx, ttft.Seconds(), modelAttr)
+			}
+			if agentLLMGenerationHist != nil && genDuration > 0 {
+				agentLLMGenerationHist.Record(cbCtx, genDuration.Seconds(), modelAttr)
+			}
+
+			// Store timing in accumulator for footer.
+			if ttft > 0 || genDuration > 0 {
+				accum.AddTiming(ttft, genDuration)
 			}
 
 			if usage != nil {

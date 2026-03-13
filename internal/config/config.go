@@ -91,8 +91,9 @@ type SlackConfig struct {
 
 // CronChannelConfig configures the cron scheduler adapter.
 type CronChannelConfig struct {
-	Enabled bool      `yaml:"enabled" mapstructure:"enabled"`
-	Jobs    []CronJob `yaml:"jobs"    mapstructure:"jobs"`
+	Enabled  bool      `yaml:"enabled"  mapstructure:"enabled"`
+	Timezone string    `yaml:"timezone" mapstructure:"timezone"` // IANA timezone name (e.g. "America/Vancouver"); defaults to UTC
+	Jobs     []CronJob `yaml:"jobs"     mapstructure:"jobs"`
 }
 
 // CronJob defines a single scheduled task.

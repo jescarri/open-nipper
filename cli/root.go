@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	cfgFile  string
-	logLevel string
-	adminURL string
+	cfgFile   string
+	logLevel  string
+	logFormat string
+	adminURL  string
 )
 
 // Root is the top-level cobra command.
@@ -26,6 +27,7 @@ var Root = &cobra.Command{
 func init() {
 	Root.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "path to config file (default: ~/.open-nipper/config.yaml)")
 	Root.PersistentFlags().StringVar(&logLevel, "log-level", "", "override log level (debug|info|warn|error)")
+	Root.PersistentFlags().StringVar(&logFormat, "log-format", "", "override log format (json|text)")
 	Root.PersistentFlags().StringVar(&adminURL, "admin-url", "http://127.0.0.1:18790", "admin API base URL")
 	Root.PersistentFlags().StringP("format", "f", "table", "Output format for admin commands: table, json, or text")
 

@@ -158,6 +158,40 @@ func TestWrapTools_PreservesNonInvokable(t *testing.T) {
 	}
 }
 
+func TestNormalizeArgs_StripsUnknownParameters(t *testing.T) {
+	inner := &stubMCPTool{
+		info:      createNoteToolInfo(),
+		returnVal: `{"ok":true}`,
+	}
+	wrapped := &resilientMCPTool{inner: inner, logger: zap.NewNop()}
+
+	// Model hallucinates "detailed" and "max_results" which are not in the schema.
+	args := `{"title":"Test","parent_id":"abc","tags":["t1"],"detailed":false,"max_results":25}`
+	_, err := wrapped.InvokableRun(context.Background(), args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(inner.lastArgs), &parsed); err != nil {
+		t.Fatalf("failed to parse forwarded args: %v", err)
+	}
+
+	if _, exists := parsed["detailed"]; exists {
+		t.Error("'detailed' should have been stripped (not in schema)")
+	}
+	if _, exists := parsed["max_results"]; exists {
+		t.Error("'max_results' should have been stripped (not in schema)")
+	}
+	// Valid fields should still be present.
+	if _, exists := parsed["title"]; !exists {
+		t.Error("'title' should still be present")
+	}
+	if _, exists := parsed["tags"]; !exists {
+		t.Error("'tags' should still be present")
+	}
+}
+
 func TestNormalizeArgs_DoesNotInjectStringDefaults(t *testing.T) {
 	inner := &stubMCPTool{
 		info:      createNoteToolInfo(),
