@@ -215,11 +215,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	if cfg.Channels.Cron.Enabled {
-		cr := cronadapter.NewAdapter(cronadapter.AdapterDeps{
+		cr, err := cronadapter.NewAdapter(cronadapter.AdapterDeps{
 			Config:    cfg.Channels.Cron,
 			Logger:    log.Named("cron"),
 			Validator: repo.IsUserEnabled,
 		})
+		if err != nil {
+			return fmt.Errorf("cron adapter: %w", err)
+		}
 		adapters[models.ChannelTypeCron] = cr
 		log.Info("cron channel adapter enabled", zap.Int("jobs", len(cfg.Channels.Cron.Jobs)))
 	}

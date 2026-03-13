@@ -16,6 +16,8 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	_ "time/tzdata" // Embed IANA timezone database
+
 	"github.com/jescarri/open-nipper/internal/config"
 	"github.com/jescarri/open-nipper/internal/models"
 )
@@ -37,13 +39,21 @@ type AdapterDeps struct {
 }
 
 // NewAdapter creates a cron adapter with an internal scheduler.
-func NewAdapter(deps AdapterDeps) *Adapter {
+func NewAdapter(deps AdapterDeps) (*Adapter, error) {
+	var loc *time.Location
+	if deps.Config.Timezone != "" {
+		var err error
+		loc, err = time.LoadLocation(deps.Config.Timezone)
+		if err != nil {
+			return nil, fmt.Errorf("cron: invalid timezone %q: %w", deps.Config.Timezone, err)
+		}
+	}
 	return &Adapter{
 		cfg:       deps.Config,
-		scheduler: NewScheduler(deps.Logger),
+		scheduler: NewScheduler(deps.Logger, loc),
 		logger:    deps.Logger,
 		validator: deps.Validator,
-	}
+	}, nil
 }
 
 // ChannelType returns ChannelTypeCron.
@@ -205,6 +215,11 @@ func (a *Adapter) Scheduler() *Scheduler {
 
 // Validate checks that the cron channel configuration is syntactically correct.
 func Validate(cfg config.CronChannelConfig) error {
+	if cfg.Timezone != "" {
+		if _, err := time.LoadLocation(cfg.Timezone); err != nil {
+			return fmt.Errorf("cron: invalid timezone %q: %w", cfg.Timezone, err)
+		}
+	}
 	seen := make(map[string]bool)
 	for _, job := range cfg.Jobs {
 		if job.ID == "" {
