@@ -16,6 +16,10 @@ type requestTokenAccumulator struct {
 	completionTokens atomic.Int64
 	steps            atomic.Int32
 	lastPromptTokens atomic.Int64 // most recent call's prompt tokens (context fill indicator)
+
+	// Timing: last LLM call's TTFT and generation duration (nanoseconds).
+	lastTTFTNs       atomic.Int64
+	lastGenDurNs     atomic.Int64
 }
 
 // Add records one LLM call's usage.
@@ -26,9 +30,20 @@ func (a *requestTokenAccumulator) Add(prompt, completion int) {
 	a.lastPromptTokens.Store(int64(prompt))
 }
 
+// AddTiming records one LLM call's timing measurements.
+func (a *requestTokenAccumulator) AddTiming(ttft, genDuration time.Duration) {
+	a.lastTTFTNs.Store(int64(ttft))
+	a.lastGenDurNs.Store(int64(genDuration))
+}
+
 // Totals returns the accumulated usage across all steps.
 func (a *requestTokenAccumulator) Totals() (prompt, completion int, steps int, lastPrompt int) {
 	return int(a.promptTokens.Load()), int(a.completionTokens.Load()), int(a.steps.Load()), int(a.lastPromptTokens.Load())
+}
+
+// LastTiming returns the last LLM call's TTFT and generation duration.
+func (a *requestTokenAccumulator) LastTiming() (ttft, genDuration time.Duration) {
+	return time.Duration(a.lastTTFTNs.Load()), time.Duration(a.lastGenDurNs.Load())
 }
 
 // SessionUsage tracks cumulative token usage and cost for a session.
@@ -142,6 +157,12 @@ func (t *UsageTracker) FormatUsage(sessionKey string) string {
 	return sb.String()
 }
 
+// FooterTiming holds optional timing breakdowns for the response footer.
+type FooterTiming struct {
+	TTFT               time.Duration // time-to-first-token (prefill)
+	GenerationDuration time.Duration // first-to-last token (decode)
+}
+
 // FormatResponseFooter returns a compact footer with generation time, token
 // counts, steps, tokens/second, context fill with compaction threshold, and
 // estimated cost.
@@ -151,7 +172,8 @@ func (t *UsageTracker) FormatUsage(sessionKey string) string {
 // prompt size of the final LLM call (context fill indicator). contextWindowMax
 // is the model's context window (0 = unknown). compactionThresholdPct is the
 // auto-compaction trigger percentage (e.g. 60 means compaction fires at 60%).
-func FormatResponseFooter(model string, promptTokens, completionTokens, steps, lastPromptTokens, contextWindowMax, compactionThresholdPct int, elapsed time.Duration) string {
+// timing is optional (nil = omit TTFT/generation breakdown).
+func FormatResponseFooter(model string, promptTokens, completionTokens, steps, lastPromptTokens, contextWindowMax, compactionThresholdPct int, elapsed time.Duration, timing *FooterTiming) string {
 	secs := elapsed.Seconds()
 	total := promptTokens + completionTokens
 
@@ -159,8 +181,11 @@ func FormatResponseFooter(model string, promptTokens, completionTokens, steps, l
 	sb.WriteString("\n\n—\n")
 	sb.WriteString(fmt.Sprintf("%.2fs", secs))
 	if total > 0 {
+		// Compute tok/s using actual generation duration if available, else total elapsed.
 		var tokPerSec float64
-		if secs > 0 && completionTokens > 0 {
+		if timing != nil && timing.GenerationDuration > 0 && completionTokens > 0 {
+			tokPerSec = float64(completionTokens) / timing.GenerationDuration.Seconds()
+		} else if secs > 0 && completionTokens > 0 {
 			tokPerSec = float64(completionTokens) / secs
 		}
 		cost := estimateCost(model, promptTokens, completionTokens)
@@ -170,6 +195,10 @@ func FormatResponseFooter(model string, promptTokens, completionTokens, steps, l
 		}
 		if tokPerSec > 0 {
 			sb.WriteString(fmt.Sprintf(" · %.0f tok/s", tokPerSec))
+		}
+		// Show TTFT (prefill time) when available.
+		if timing != nil && timing.TTFT > 0 {
+			sb.WriteString(fmt.Sprintf(" · TTFT: %.2fs", timing.TTFT.Seconds()))
 		}
 		if contextWindowMax > 0 && lastPromptTokens > 0 {
 			fillPct := float64(lastPromptTokens) / float64(contextWindowMax) * 100.0
