@@ -648,7 +648,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	r.logger.Debug("LLM input messages",
 		zap.String("sessionKey", msg.SessionKey),
 		zap.Int("historyMessages", len(history)),
-		zap.String("userMessage", debugTruncate(userMsgText.Content, 500)),
+		zap.String("userMessage", userMsgText.Content),
 		zap.Int("userMessageMultiParts", len(userMsg.UserInputMultiContent)),
 	)
 	if inlineErr != nil {
@@ -663,7 +663,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 			zap.String("sessionKey", msg.SessionKey),
 			zap.Int("index", i),
 			zap.String("role", string(m.Role)),
-			zap.String("content", debugTruncate(m.Content, 300)),
+			zap.String("content", m.Content),
 			zap.Int("userMultiParts", len(m.UserInputMultiContent)),
 			zap.Int("assistantMultiParts", len(m.AssistantGenMultiContent)),
 		)
@@ -841,6 +841,20 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	modelCallback := r.buildModelCallback(msg.SessionKey, publisher, &tokenAccum)
 	agentCallback := react.BuildAgentCallback(modelCallback, toolCallback)
 
+	// Log full tool schemas at debug level so the entire LLM prompt is visible.
+	toolNames := make([]string, 0, len(agentCfg.ToolsConfig.Tools))
+	for _, t := range agentCfg.ToolsConfig.Tools {
+		if info, infoErr := t.Info(ctx); infoErr == nil {
+			toolNames = append(toolNames, info.Name)
+			r.logger.Debug("LLM tool schema",
+				zap.String("sessionKey", msg.SessionKey),
+				zap.String("toolName", info.Name),
+				zap.String("description", info.Desc),
+				zap.Any("parameters", info.ParamsOneOf),
+			)
+		}
+	}
+
 	r.logger.Debug("invoking ReAct agent",
 		zap.String("sessionKey", msg.SessionKey),
 		zap.String("responseId", responseID),
@@ -848,6 +862,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 		zap.String("provider", r.cfg.Inference.Provider),
 		zap.Int("maxSteps", r.cfg.MaxSteps),
 		zap.Int("toolCount", len(agentCfg.ToolsConfig.Tools)),
+		zap.Strings("toolNames", toolNames),
 	)
 
 	const maxLLMAttempts = 3

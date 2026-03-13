@@ -81,6 +81,11 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("setting log level override: %w", err)
 		}
 	}
+	if logFormat != "" {
+		if err := os.Setenv("NIPPER_LOG_FORMAT", logFormat); err != nil {
+			return fmt.Errorf("setting log format override: %w", err)
+		}
+	}
 
 	// 1. Load agent config from YAML (if provided).
 	// cfgFile is set by the root persistent --config / -c flag.

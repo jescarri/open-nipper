@@ -60,6 +60,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("setting log level override: %w", err)
 		}
 	}
+	if logFormat != "" {
+		if err := os.Setenv("NIPPER_LOG_FORMAT", logFormat); err != nil {
+			return fmt.Errorf("setting log format override: %w", err)
+		}
+	}
 
 	// --- 1. Load configuration ---
 	configPath, _ := cmd.Root().PersistentFlags().GetString("config")
