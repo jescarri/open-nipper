@@ -38,6 +38,11 @@ const (
 	// start and complete the initialize handshake. Prevents agent startup from
 	// blocking on slow or stuck STDIO servers.
 	stdioConnectTimeout = 60 * time.Second
+	// sseConnectTimeout is the max time to wait for an SSE/Streamable MCP
+	// server to connect during initial startup. If the server is not available
+	// within this timeout, the agent starts without it and retries in the
+	// background.
+	sseConnectTimeout = 10 * time.Second
 )
 
 // Loader manages MCP client connections and exposes their tools as Eino BaseTools.
@@ -95,6 +100,7 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 
 	hasSSE := false
 	stdioIndices := make([]int, 0)
+	sseRetryIndices := make([]int, 0)
 	for i, cfg := range configs {
 		if err := validateConfig(cfg); err != nil {
 			l.Close()
@@ -126,10 +132,21 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 			hasSSE = true
 		}
 
-		cli, session, err := l.createClient(loaderCtx, expanded)
+		// SSE/Streamable: try to connect with a timeout. If the server is not
+		// available, add a placeholder and retry in the background so the agent
+		// can still start and process messages with whatever tools are available.
+		connectCtx, connectCancel := context.WithTimeout(loaderCtx, sseConnectTimeout)
+		cli, session, err := l.createClient(connectCtx, expanded)
+		connectCancel()
 		if err != nil {
-			l.Close()
-			return nil, fmt.Errorf("mcp server %q: %w", expanded.Name, err)
+			logger.Warn("MCP server not available at startup, will retry in background",
+				zap.String("name", expanded.Name),
+				zap.String("transport", expanded.Transport),
+				zap.Error(err),
+			)
+			l.clients = append(l.clients, &managedClient{name: expanded.Name, client: nil, session: nil})
+			sseRetryIndices = append(sseRetryIndices, len(l.clients)-1)
+			continue
 		}
 
 		l.clients = append(l.clients, &managedClient{
@@ -145,8 +162,11 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 	}
 
 	if err := l.reloadTools(loaderCtx); err != nil {
-		l.Close()
-		return nil, err
+		// reloadTools only errors when ALL servers fail; if some connected,
+		// this won't error. If none connected, we still want to start.
+		logger.Warn("initial tool reload failed (will retry after background connections)",
+			zap.Error(err),
+		)
 	}
 
 	if hasSSE {
@@ -155,6 +175,10 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 
 	if len(stdioIndices) > 0 {
 		go l.connectStdioAsync(stdioIndices)
+	}
+
+	for _, idx := range sseRetryIndices {
+		go l.reconnectWithBackoff(idx)
 	}
 
 	return l, nil

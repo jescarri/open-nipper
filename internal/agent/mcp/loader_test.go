@@ -425,6 +425,80 @@ func TestToolsReturnsSnapshot(t *testing.T) {
 	}
 }
 
+func TestNewLoaderSSEUnavailableDoesNotBlock(t *testing.T) {
+	// Use a URL that will refuse connections immediately.
+	configs := []config.MCPServerConfig{
+		{
+			Name:      "unavailable-sse",
+			Transport: "sse",
+			URL:       "http://127.0.0.1:1/sse",
+		},
+	}
+	loader, err := NewLoader(t.Context(), configs, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("NewLoader should not fail when SSE server is unreachable, got: %v", err)
+	}
+	defer loader.Close()
+
+	// The loader should have a placeholder client but no tools yet.
+	if len(loader.Tools()) != 0 {
+		t.Fatalf("expected 0 tools when server is unreachable, got %d", len(loader.Tools()))
+	}
+	loader.mu.RLock()
+	clientCount := len(loader.clients)
+	loader.mu.RUnlock()
+	if clientCount != 1 {
+		t.Fatalf("expected 1 placeholder client, got %d", clientCount)
+	}
+}
+
+func TestNewLoaderStreamableUnavailableDoesNotBlock(t *testing.T) {
+	configs := []config.MCPServerConfig{
+		{
+			Name:      "unavailable-streamable",
+			Transport: "streamable",
+			URL:       "http://127.0.0.1:1/mcp",
+		},
+	}
+	loader, err := NewLoader(t.Context(), configs, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("NewLoader should not fail when Streamable server is unreachable, got: %v", err)
+	}
+	defer loader.Close()
+
+	if len(loader.Tools()) != 0 {
+		t.Fatalf("expected 0 tools when server is unreachable, got %d", len(loader.Tools()))
+	}
+}
+
+func TestNewLoaderMixedAvailability(t *testing.T) {
+	// One unavailable SSE + one unavailable Streamable: loader should still start.
+	configs := []config.MCPServerConfig{
+		{
+			Name:      "unavail-sse",
+			Transport: "sse",
+			URL:       "http://127.0.0.1:1/sse",
+		},
+		{
+			Name:      "unavail-stream",
+			Transport: "streamable",
+			URL:       "http://127.0.0.1:1/mcp",
+		},
+	}
+	loader, err := NewLoader(t.Context(), configs, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("NewLoader should not fail with multiple unavailable servers, got: %v", err)
+	}
+	defer loader.Close()
+
+	loader.mu.RLock()
+	clientCount := len(loader.clients)
+	loader.mu.RUnlock()
+	if clientCount != 2 {
+		t.Fatalf("expected 2 placeholder clients, got %d", clientCount)
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && contains(s, substr))
 }

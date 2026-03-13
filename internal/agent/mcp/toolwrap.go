@@ -79,15 +79,17 @@ func (r *resilientMCPTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	return result, nil
 }
 
-// normalizeArgs injects zero-value defaults for required schema fields that
-// are missing from the model's arguments. Currently handles array → [].
+// normalizeArgs fixes common model mistakes in tool call arguments:
+//  1. Injects zero-values for required array fields the model omitted.
+//  2. Strips parameters not defined in the schema (models like Llama often
+//     hallucinate extra fields such as "detailed" or "max_results").
 func (r *resilientMCPTool) normalizeArgs(info *schema.ToolInfo, argsJSON string) string {
 	if info == nil || info.ParamsOneOf == nil {
 		return argsJSON
 	}
 
 	jsSchema, err := info.ParamsOneOf.ToJSONSchema()
-	if err != nil || jsSchema == nil || len(jsSchema.Required) == 0 {
+	if err != nil || jsSchema == nil {
 		return argsJSON
 	}
 
@@ -97,6 +99,21 @@ func (r *resilientMCPTool) normalizeArgs(info *schema.ToolInfo, argsJSON string)
 	}
 
 	changed := false
+
+	// Strip unknown parameters not defined in the schema.
+	if jsSchema.Properties != nil {
+		for key := range args {
+			if _, defined := jsSchema.Properties.Get(key); !defined {
+				delete(args, key)
+				changed = true
+				r.logger.Debug("stripped unknown parameter from tool call",
+					zap.String("field", key),
+				)
+			}
+		}
+	}
+
+	// Inject empty arrays for missing required array fields.
 	for _, reqField := range jsSchema.Required {
 		if _, exists := args[reqField]; exists {
 			continue
