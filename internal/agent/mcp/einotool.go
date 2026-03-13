@@ -33,6 +33,12 @@ func GetToolsFromSession(ctx context.Context, session *mcpsdk.ClientSession, sof
 		if err != nil {
 			return nil, fmt.Errorf("marshaling input schema for tool %q: %w", t.Name, err)
 		}
+		// Normalize JSON Schema boolean schemas (true/false) to object form so
+		// downstream (e.g. OpenAI API) does not reject with "Unrecognized schema: true".
+		inputSchemaBytes, err = normalizeBooleanSchemas(inputSchemaBytes)
+		if err != nil {
+			return nil, fmt.Errorf("normalizing input schema for tool %q: %w", t.Name, err)
+		}
 		parsedSchema := &jsonschema.Schema{}
 		if err := json.Unmarshal(inputSchemaBytes, parsedSchema); err != nil {
 			return nil, fmt.Errorf("parsing input schema for tool %q: %w", t.Name, err)
@@ -93,6 +99,44 @@ func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ..
 	}
 
 	return string(resultBytes), nil
+}
+
+// normalizeBooleanSchemas rewrites raw JSON schema bytes so that any boolean
+// schema (true or false) is replaced by an object schema. Some MCP servers (e.g.
+// Google Workspace MCP) emit "properties": {"foo": true}, which causes APIs
+// like OpenAI to return "Unrecognized schema: true". We replace true with
+// {"type": "object"} and false with {"type": "object", "description": "unsupported"}.
+func normalizeBooleanSchemas(raw []byte) ([]byte, error) {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	normalized := normalizeBooleanSchemasRecurse(v)
+	return json.Marshal(normalized)
+}
+
+func normalizeBooleanSchemasRecurse(v any) any {
+	switch x := v.(type) {
+	case bool:
+		if x {
+			return map[string]any{"type": "object"}
+		}
+		return map[string]any{"type": "object", "description": "unsupported"}
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[k] = normalizeBooleanSchemasRecurse(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, val := range x {
+			out[i] = normalizeBooleanSchemasRecurse(val)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // fixPatterns recursively walks a JSON schema and ensures every "pattern"

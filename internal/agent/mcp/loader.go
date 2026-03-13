@@ -34,6 +34,10 @@ const (
 	pingTimeout              = 10 * time.Second
 	reconnectInitialDelay    = 1 * time.Second
 	reconnectMaxDelay        = 60 * time.Second
+	// stdioConnectTimeout is the max time to wait for a STDIO MCP subprocess to
+	// start and complete the initialize handshake. Prevents agent startup from
+	// blocking on slow or stuck STDIO servers.
+	stdioConnectTimeout = 60 * time.Second
 )
 
 // Loader manages MCP client connections and exposes their tools as Eino BaseTools.
@@ -90,6 +94,7 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 	}
 
 	hasSSE := false
+	stdioIndices := make([]int, 0)
 	for i, cfg := range configs {
 		if err := validateConfig(cfg); err != nil {
 			l.Close()
@@ -107,23 +112,31 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 			}
 		}
 
+		transport := strings.ToLower(expanded.Transport)
+		if transport == "stdio" {
+			// Connect STDIO in the background so agent startup does not block on
+			// slow subprocess startup (e.g. Docker). Tools appear when the server
+			// is ready.
+			l.clients = append(l.clients, &managedClient{name: expanded.Name, client: nil, session: nil})
+			stdioIndices = append(stdioIndices, len(l.clients)-1)
+			continue
+		}
+
+		if transport == "sse" || transport == "streamable" {
+			hasSSE = true
+		}
+
 		cli, session, err := l.createClient(loaderCtx, expanded)
 		if err != nil {
 			l.Close()
 			return nil, fmt.Errorf("mcp server %q: %w", expanded.Name, err)
 		}
 
-		mc := &managedClient{
+		l.clients = append(l.clients, &managedClient{
 			name:    expanded.Name,
 			client:  cli,
 			session: session,
-		}
-		l.clients = append(l.clients, mc)
-
-		transport := strings.ToLower(expanded.Transport)
-		if transport == "sse" || transport == "streamable" {
-			hasSSE = true
-		}
+		})
 
 		logger.Info("mcp server connected",
 			zap.String("name", expanded.Name),
@@ -138,6 +151,10 @@ func NewLoader(ctx context.Context, configs []config.MCPServerConfig, logger *za
 
 	if hasSSE {
 		go l.keepaliveLoop()
+	}
+
+	if len(stdioIndices) > 0 {
+		go l.connectStdioAsync(stdioIndices)
 	}
 
 	return l, nil
@@ -433,6 +450,55 @@ func (l *Loader) reconnectClient(idx int) error {
 	}
 
 	return nil
+}
+
+// connectStdioAsync connects STDIO MCP servers in the background. Each server
+// is given stdioConnectTimeout to start and complete the initialize handshake.
+// When a server connects, its tools are merged via reloadTools. Loader.ctx
+// cancellation stops further connection attempts.
+func (l *Loader) connectStdioAsync(stdioIndices []int) {
+	for _, idx := range stdioIndices {
+		select {
+		case <-l.ctx.Done():
+			return
+		default:
+		}
+
+		l.mu.RLock()
+		if idx >= len(l.configs) {
+			l.mu.RUnlock()
+			continue
+		}
+		cfg := l.configs[idx]
+		l.mu.RUnlock()
+
+		connectCtx, cancel := context.WithTimeout(l.ctx, stdioConnectTimeout)
+		cli, session, err := l.createClient(connectCtx, cfg)
+		cancel()
+		if err != nil {
+			l.logger.Warn("STDIO MCP server failed to connect (will not retry in this session)",
+				zap.String("name", cfg.Name),
+				zap.Duration("timeout", stdioConnectTimeout),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		mc := &managedClient{name: cfg.Name, client: cli, session: session}
+		l.mu.Lock()
+		if idx < len(l.clients) {
+			l.clients[idx] = mc
+		}
+		l.mu.Unlock()
+
+		l.logger.Info("mcp server connected",
+			zap.String("name", cfg.Name),
+			zap.String("transport", cfg.Transport),
+		)
+		if err := l.reloadTools(l.ctx); err != nil {
+			l.logger.Warn("reload tools after STDIO connect failed", zap.Error(err))
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
