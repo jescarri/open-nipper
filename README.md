@@ -13,7 +13,8 @@ A multi-channel AI gateway that routes messages between messaging channels (What
 - **Skills and MCP:** Supports skills and local or remote MCP (SSE or STDIO); we favour SSE for remote tools.
 - **Proven WhatsApp stack:** Uses [Wuzapi](https://github.com/asternic/wuzapi) for WhatsApp; the gateway is decoupled from the messaging network.
 - **Sandboxed agent:** With sandbox enabled, the agent runs in containers; you can drop all capabilities if you want.
-- **Container and sandbox:** The agent can run in a container; enabling the sandbox requires mounting the container runtime socket. Kubernetes pod sandbox is in the works.
+- **Container and sandbox:** The agent can run in a container; enabling the sandbox requires mounting the container runtime socket (Docker-out-of-Docker). Kubernetes pod sandbox is in the works.
+- **Containerized STDIO MCPs:** STDIO MCP servers can run inside the sandbox container, keeping untrusted tools isolated from the host.
 - **Support for Speech Recognition:** The agent can recognize speech and use it as a prompt, voice cloning and responses are next.
 
 ## Architecture
@@ -251,6 +252,49 @@ channels:
 ```
 
 The `user_id` must exist and be enabled. Responses are broadcast to `notify_channels` (not back to cron).
+
+---
+
+## Docker-out-of-Docker (sandbox and STDIO MCPs)
+
+When the agent runs inside a Docker container (e.g. via docker-compose), the sandbox and STDIO MCP features need access to a Docker daemon. Open-Nipper uses the **Docker-out-of-Docker (DooD)** pattern:
+
+- The agent container image ships with the **Docker CLI only** (no daemon).
+- The host's Docker socket is bind-mounted into the agent container at `/var/run/docker.sock`.
+- The agent's sandbox manager calls `docker run` / `docker exec` through the CLI, which talks to the host daemon via the socket.
+
+This is simpler and lighter than running a full Docker-in-Docker (DinD) daemon. Sandbox containers and STDIO MCP containers are siblings of the agent container on the host daemon.
+
+### How it works
+
+```
+┌─────────────────────────────────────────────┐
+│  Host                                       │
+│                                             │
+│  docker daemon                              │
+│    ├── agent container (has docker CLI)      │
+│    │     └── /var/run/docker.sock (mount)    │
+│    ├── nipper-sandbox-xxxx (created by agent)│
+│    └── stdio-mcp-yyyy     (created by agent)│
+└─────────────────────────────────────────────┘
+```
+
+### docker-compose setup
+
+The `deploy/docker-compose/docker-compose.yml` already includes the socket mount:
+
+```yaml
+agent:
+  image: ghcr.io/jescarri/open-nipper:latest
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+```
+
+### Security considerations
+
+- Mounting the Docker socket grants the agent container the ability to manage containers on the host. This is equivalent to root access on the host.
+- Sandbox containers are hardened with `--cap-drop ALL`, read-only root FS, memory/CPU limits, and `no-new-privileges` (see `docs/SANDBOX_APT_CAPABILITIES.md`).
+- For production, consider using a socket proxy (e.g. [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)) to restrict the API surface exposed to the agent.
 
 ---
 
