@@ -160,6 +160,9 @@ func (m *Manager) shutdownGroup(ctx context.Context, g phaseGroup) []error {
 		mu.Lock()
 		errs = append(errs, fmt.Errorf("phase %d: %w", g.phase, ctx.Err()))
 		mu.Unlock()
+		// Wait for in-flight goroutines to finish before reading errs,
+		// otherwise we race on the slice.
+		<-done
 	}
 
 	return errs
