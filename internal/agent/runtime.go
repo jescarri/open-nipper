@@ -27,7 +27,6 @@ import (
 
 	"github.com/jescarri/open-nipper/internal/agent/enrich"
 	agentllm "github.com/jescarri/open-nipper/internal/agent/llm"
-	agentmemory "github.com/jescarri/open-nipper/internal/agent/memory"
 	agentmcp "github.com/jescarri/open-nipper/internal/agent/mcp"
 	"github.com/jescarri/open-nipper/internal/agent/registration"
 	"github.com/jescarri/open-nipper/internal/agent/skills"
@@ -237,7 +236,6 @@ type Runtime struct {
 	sessions  session.SessionStore
 	logger    *zap.Logger
 
-	memoryStore  *agentmemory.Store
 	usageTracker *UsageTracker
 	mcpLoader        *agentmcp.Loader   // live reference; tools are resolved dynamically on each message
 	skillsLoader     *skills.Loader    // optional; skills injected into system prompt when non-nil
@@ -281,11 +279,6 @@ func NewRuntime(
 
 // RuntimeOption configures optional Runtime dependencies.
 type RuntimeOption func(*Runtime)
-
-// WithMemoryStore attaches a durable memory store.
-func WithMemoryStore(store *agentmemory.Store) RuntimeOption {
-	return func(r *Runtime) { r.memoryStore = store }
-}
 
 // WithUsageTracker attaches a usage tracker.
 func WithUsageTracker(tracker *UsageTracker) RuntimeOption {
@@ -803,12 +796,54 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	// 3.5b. Scope cron API to the session user so list/add/remove use the same user.
 	ctx = tools.CronContextWithUserID(ctx, msg.UserID)
 
-	// 4. Create the Eino ReAct agent.
+	// 4. Assemble tools and create the Eino ReAct agent.
+	//
+	// Two modes controlled by inference.lean_mcp_tools:
+	//   false (legacy): bind ALL tools (native + MCP) in a single agent.
+	//   true  (lean):   Phase 1 — bind native + search_tools only (LLM discovers MCP tools).
+	//                   Phase 2 — rebind with native + matched MCP tools, then execute.
 	toolAssemblyStart := time.Now()
+
+	leanMode := r.cfg.Inference.LeanMCPTools && r.mcpLoader != nil && len(r.mcpLoader.ToolInfos()) > 0
+	var agentTools []einotool.BaseTool
+	var mcpCatalog []tools.ToolCatalogEntry
+
+	if leanMode {
+		// Lean MCP mode: pre-filter MCP tools using keyword matching on the user message.
+		// This avoids a Phase 1 LLM round-trip — the runtime resolves tools directly.
+		// If no tools match the message, all MCP tools are included as fallback.
+		mcpCatalog = r.buildMCPToolCatalog()
+		matcher := &tools.KeywordToolMatcher{}
+		userText := ""
+		if msg != nil {
+			userText = msg.Content.Text
+		}
+		matched, _ := matcher.Match(ctx, userText, mcpCatalog, 10)
+		if len(matched) > 0 {
+			agentTools = r.resolvedTools(matched)
+			r.logger.Info("lean MCP mode: resolved tools from user message",
+				zap.String("sessionKey", msg.SessionKey),
+				zap.Int("nativeCount", len(r.tools)),
+				zap.Int("mcpMatched", len(matched)),
+				zap.Strings("matched", matched),
+			)
+		} else {
+			// Fallback: no keyword match — include search_tools so LLM can discover.
+			agentTools = r.leanTools(mcpCatalog)
+			r.logger.Debug("lean MCP mode: no keyword match, using search_tools",
+				zap.String("sessionKey", msg.SessionKey),
+				zap.Int("nativeCount", len(r.tools)),
+				zap.Int("mcpCatalogSize", len(mcpCatalog)),
+			)
+		}
+	} else {
+		agentTools = r.currentTools()
+	}
+
 	agentCfg := &react.AgentConfig{
 		ToolCallingModel: nil, // set below if the model supports it
 		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: wrapToolsWithDedup(sanitizeToolDescriptions(r.currentTools())),
+			Tools: wrapToolsWithDedup(sanitizeToolDescriptions(agentTools)),
 		},
 		MaxStep:         r.cfg.MaxSteps,
 		MessageModifier: react.NewPersonaModifier(systemPrompt), //nolint:staticcheck // SA1019: deprecated; prefer persona in input
@@ -1277,12 +1312,12 @@ generated:
 // SystemPromptStats holds byte sizes of the system prompt and its sections (for logging and metrics).
 type SystemPromptStats struct {
 	TotalBytes       int // full system prompt
-	BaseBytes        int // persona + profile + memory + commands + skills (before tool hints)
+	BaseBytes        int // persona + profile + commands + skills (before tool hints)
 	ToolSectionBytes int // tool hints + rules + security directives (includes MCP)
 	McpHintBytes     int // MCP tool descriptions only
 }
 
-// buildSystemPrompt assembles the full system prompt from config, persona, memory, tools, and channel.
+// buildSystemPrompt assembles the full system prompt from config, persona, tools, and channel.
 // extraInstructions, if non-empty, are appended at the end (e.g. "user just shared location, ask if they want weather").
 // It returns the prompt and stats for logging/metrics.
 func (r *Runtime) buildSystemPrompt(msg *models.NipperMessage, extraInstructions string) (string, *SystemPromptStats) {
@@ -1304,32 +1339,6 @@ func (r *Runtime) buildSystemPrompt(msg *models.NipperMessage, extraInstructions
 	// Inject persistent user profile.
 	if profile, err := LoadProfile(r.cfg.BasePath, r.reg.UserID); err == nil && !profile.IsEmpty() {
 		prompt = prompt + "\n\n" + profile.FormatForPrompt()
-	}
-
-	// Inject durable memory context.
-	// Scale memory budget based on context window: smaller windows get less
-	// memory to leave room for conversation history and tool results.
-	if r.memoryStore != nil {
-		days := r.cfg.Memory.MaxDays
-		if days <= 0 {
-			days = 7
-		}
-		maxBytes := r.cfg.Memory.MaxTokens
-		if maxBytes <= 0 {
-			maxBytes = 4000
-		}
-		// For context windows <= 32k, halve the memory budget and days to
-		// prioritize conversation context over historical memory.
-		if r.contextWindowMax > 0 && r.contextWindowMax <= 32768 {
-			maxBytes = maxBytes / 2
-			if days > 3 {
-				days = 3
-			}
-		}
-		memCtx := r.memoryStore.Inject(days, maxBytes)
-		if memCtx != "" {
-			prompt = prompt + "\n\n" + memCtx
-		}
 	}
 
 	// Append available commands reference.
@@ -1443,13 +1452,10 @@ SAFETY RULES (MANDATORY):
 func (r *Runtime) appendToolHints(base string, msg *models.NipperMessage) (string, int) {
 	var mcpHintBytes int
 
-	// Collect MCP tool names for the compact listing.
-	var mcpNames []string
+	// Collect MCP tool infos.
+	var mcpInfos []agentmcp.ToolInfo
 	if r.mcpLoader != nil {
-		for _, ti := range r.mcpLoader.ToolInfos() {
-			mcpNames = append(mcpNames, ti.Name)
-			mcpHintBytes += len(ti.Name) + 2
-		}
+		mcpInfos = r.mcpLoader.ToolInfos()
 	}
 
 	// Build a compact tool listing — schemas carry the full descriptions.
@@ -1466,9 +1472,6 @@ func (r *Runtime) appendToolHints(base string, msg *models.NipperMessage) (strin
 	if r.cfg.Tools.DocFetcher {
 		toolNames = append(toolNames, "doc_fetch")
 	}
-	if r.cfg.Tools.Memory {
-		toolNames = append(toolNames, "memory_write", "memory_read")
-	}
 	if r.cfg.Tools.Weather {
 		toolNames = append(toolNames, "get_weather")
 	}
@@ -1479,13 +1482,38 @@ func (r *Runtime) appendToolHints(base string, msg *models.NipperMessage) (strin
 	if r.skillsLoader != nil && len(r.skillsLoader.AvailableSkills()) > 0 {
 		toolNames = append(toolNames, "skill_exec")
 	}
-	toolNames = append(toolNames, mcpNames...)
+
+	leanMode := r.cfg.Inference.LeanMCPTools && len(mcpInfos) > 0
+	if leanMode {
+		// In lean mode, add search_tools instead of individual MCP tool names.
+		toolNames = append(toolNames, "search_tools")
+	} else {
+		// Legacy: list all MCP tool names inline.
+		for _, ti := range mcpInfos {
+			toolNames = append(toolNames, ti.Name)
+			mcpHintBytes += len(ti.Name) + 2
+		}
+	}
 
 	if len(toolNames) == 0 {
 		return base, 0
 	}
 
 	prompt := base + "\n\nTools: " + strings.Join(toolNames, ", ") + "."
+
+	// In lean mode, append a compact MCP tool catalog so the model knows what to search for.
+	if leanMode {
+		prompt += "\n\nMCP tools (call search_tools to activate):\n"
+		for _, ti := range mcpInfos {
+			desc := ti.Desc
+			if len(desc) > 80 {
+				desc = desc[:77] + "..."
+			}
+			line := "- " + ti.Name + ": " + desc + "\n"
+			prompt += line
+			mcpHintBytes += len(line)
+		}
+	}
 
 	// Behavioral rules (compact).
 	prompt += `
@@ -1508,6 +1536,47 @@ IMAGE RULES:
 
 	return prompt, mcpHintBytes
 }
+
+// buildMCPToolCatalog creates ToolCatalogEntry items from the MCP loader.
+func (r *Runtime) buildMCPToolCatalog() []tools.ToolCatalogEntry {
+	if r.mcpLoader == nil {
+		return nil
+	}
+	infos := r.mcpLoader.ToolInfos()
+	catalog := make([]tools.ToolCatalogEntry, 0, len(infos))
+	for _, ti := range infos {
+		catalog = append(catalog, tools.ToolCatalogEntry{
+			Name:        ti.Name,
+			Description: ti.Desc,
+		})
+	}
+	return catalog
+}
+
+// leanTools returns native tools + search_tools (no MCP tools bound).
+// Used as the Phase 1 tool set in lean MCP mode.
+func (r *Runtime) leanTools(catalog []tools.ToolCatalogEntry) []einotool.BaseTool {
+	searchTool, err := tools.BuildSearchToolsTool(catalog, &tools.KeywordToolMatcher{})
+	if err != nil {
+		r.logger.Error("failed to build search_tools", zap.Error(err))
+		return r.tools // fallback to native only
+	}
+	out := make([]einotool.BaseTool, 0, len(r.tools)+1)
+	out = append(out, r.tools...)
+	out = append(out, searchTool)
+	return out
+}
+
+// resolvedTools returns native tools + only the named MCP tools.
+// Used as the Phase 2 tool set in lean MCP mode after search_tools resolves.
+func (r *Runtime) resolvedTools(mcpNames []string) []einotool.BaseTool {
+	mcpTools := r.mcpLoader.ToolsByNames(mcpNames)
+	out := make([]einotool.BaseTool, 0, len(r.tools)+len(mcpTools))
+	out = append(out, r.tools...)
+	out = append(out, mcpTools...)
+	return out
+}
+
 
 // messageHasImages returns true if the message contains image content parts.
 func messageHasImages(msg *models.NipperMessage) bool {

@@ -274,6 +274,33 @@ func (l *Loader) ToolInfos() []ToolInfo {
 	return infos
 }
 
+// ToolsByNames returns only the MCP tools whose names are in the given set.
+// Used by lean MCP mode to bind a subset of tools after search_tools resolves.
+func (l *Loader) ToolsByNames(names []string) []tool.BaseTool {
+	if l == nil || len(names) == 0 {
+		return nil
+	}
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var matched []tool.BaseTool
+	for _, t := range l.tools {
+		info, err := t.Info(context.Background())
+		if err != nil {
+			continue
+		}
+		if nameSet[info.Name] {
+			matched = append(matched, t)
+		}
+	}
+	return matched
+}
+
 // Close shuts down the keepalive goroutine, closes all MCP clients, and releases resources.
 func (l *Loader) Close() {
 	if l == nil {
