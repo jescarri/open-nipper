@@ -449,6 +449,66 @@ func TestBuildPromptSectionForSkills_NilActiveShowsAll(t *testing.T) {
 	}
 }
 
+func TestBuildPromptSectionForSkills_EmptyNonNilShowsAllSlim(t *testing.T) {
+	dir := t.TempDir()
+	skillsDir := filepath.Join(dir, "skills")
+	for _, s := range []struct{ name, md string }{
+		{"alpha", "# Alpha\nAlpha full description here."},
+		{"beta", "# Beta\nBeta full description here."},
+	} {
+		d := filepath.Join(skillsDir, s.name)
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte(s.md), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	l, err := NewLoader(dir, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Non-nil empty slice: matching was attempted, nothing matched → all slim.
+	section := l.BuildPromptSectionForSkills([]string{})
+	if strings.Contains(section, "<skill") {
+		t.Errorf("empty non-nil activeSkills should NOT produce full <skill> tags: %s", section)
+	}
+	if !strings.Contains(section, "- alpha:") {
+		t.Errorf("expected alpha in slim list: %s", section)
+	}
+	if !strings.Contains(section, "- beta:") {
+		t.Errorf("expected beta in slim list: %s", section)
+	}
+}
+
+func TestPromptDesc_UsesPromptHint(t *testing.T) {
+	s := Skill{
+		Name:        "deploy",
+		Description: "# Deploy\n\nThis is a very long SKILL.md with lots of steps...",
+		Config: &SkillConfig{
+			PromptHint: "Deploy the app. Use deploy_tool with env and branch params.",
+		},
+	}
+	got := s.promptDesc()
+	want := "Deploy the app. Use deploy_tool with env and branch params."
+	if got != want {
+		t.Errorf("promptDesc() = %q, want %q", got, want)
+	}
+}
+
+func TestPromptDesc_FallsBackToDescription(t *testing.T) {
+	s := Skill{
+		Name:        "deploy",
+		Description: "# Deploy\nFull description.",
+	}
+	got := s.promptDesc()
+	if got != s.Description {
+		t.Errorf("promptDesc() should fall back to Description, got %q", got)
+	}
+}
+
 func TestNewLoader_MalformedConfigYAML(t *testing.T) {
 	dir := t.TempDir()
 	skillsDir := filepath.Join(dir, "skills")

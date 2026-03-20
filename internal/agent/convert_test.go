@@ -10,6 +10,56 @@ import (
 	"github.com/jescarri/open-nipper/pkg/session"
 )
 
+func TestStripControlChars(t *testing.T) {
+	tests := []struct {
+		name, input, want string
+	}{
+		{"preserves normal text", "hello world", "hello world"},
+		{"preserves newlines and tabs", "hello\n\tworld", "hello\n\tworld"},
+		{"strips ETX (0x03)", "add a calendar invite:\x03\nuser@email.com", "add a calendar invite:\nuser@email.com"},
+		{"strips NUL", "hello\x00world", "helloworld"},
+		{"strips BEL SOH STX", "\x01\x02\x07text", "text"},
+		{"preserves unicode", "héllo wörld 🌍", "héllo wörld 🌍"},
+		{"empty string", "", ""},
+		{"strips carriage return", "line1\r\nline2", "line1\nline2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripControlChars(tt.input)
+			if got != tt.want {
+				t.Errorf("stripControlChars(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNipperMessageToEinoMessage_StripsControlChars(t *testing.T) {
+	msg := &models.NipperMessage{
+		Content: models.MessageContent{Text: "hello\x03world"},
+	}
+	eino := NipperMessageToEinoMessage(msg)
+	if strings.Contains(eino.Content, "\x03") {
+		t.Error("expected ETX control char to be stripped")
+	}
+	if eino.Content != "helloworld" {
+		t.Errorf("expected 'helloworld', got %q", eino.Content)
+	}
+}
+
+func TestNipperMessageToEinoMessage_StripsControlCharsFromParts(t *testing.T) {
+	msg := &models.NipperMessage{
+		Content: models.MessageContent{
+			Parts: []models.ContentPart{
+				{Type: "text", Text: "text\x03from\x01part"},
+			},
+		},
+	}
+	eino := NipperMessageToEinoMessage(msg)
+	if eino.Content != "textfrompart" {
+		t.Errorf("expected 'textfrompart', got %q", eino.Content)
+	}
+}
+
 func TestTranscriptLinesToEinoMessages(t *testing.T) {
 	lines := []session.TranscriptLine{
 		{Role: "user", Content: "Hello"},

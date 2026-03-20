@@ -19,6 +19,7 @@ type SkillConfig struct {
 	Name        string           `yaml:"name"`
 	Version     string           `yaml:"version"`
 	Description string           `yaml:"description"`
+	PromptHint  string           `yaml:"prompt_hint"` // compact LLM-facing summary; used instead of full SKILL.md when present
 	Type        string           `yaml:"type"`        // "script" (default) | "mcp" — mcp = no script, use MCP tools only
 	Runtime     string           `yaml:"runtime"`     // "bash" | "node" | "python"
 	Entrypoint  string           `yaml:"entrypoint"`  // e.g. "scripts/run.sh"
@@ -41,6 +42,16 @@ type SkillSecretRef struct {
 // SkillDeps lists required system dependencies.
 type SkillDeps struct {
 	System []string `yaml:"system"` // required binaries
+}
+
+// promptDesc returns the text to inject for this skill in the system prompt.
+// If config.yaml provides a compact prompt_hint, that is used instead of the
+// full SKILL.md body, significantly reducing prompt size for large skills.
+func (s *Skill) promptDesc() string {
+	if s.Config != nil && s.Config.PromptHint != "" {
+		return s.Config.PromptHint
+	}
+	return s.Description
 }
 
 // IsMCPOnly returns true if this skill has no runnable script and should be used via MCP tools only.

@@ -195,8 +195,17 @@ func (l *Loader) BuildSlimPromptSection() string {
 }
 
 // BuildPromptSectionForSkills returns the full prompt section but only includes
-// full descriptions for the named skills. Other skills get a 1-line summary.
-// If activeSkills is nil or empty, all skills get full descriptions (legacy behavior).
+// full descriptions for the named active skills. Other skills get a 1-line summary.
+//
+// Behavior based on activeSkills value:
+//   - nil: legacy include-all mode — every skill gets its full description.
+//   - non-nil (even if empty): only named skills get full descriptions;
+//     all others get a compact 1-line summary. When the slice is non-nil but
+//     empty, every skill gets the slim treatment, saving significant context.
+//
+// For active skills that have a PromptHint in their config, the hint is used
+// instead of the full SKILL.md body, further reducing prompt size.
+//
 // Skills that require a sandbox are excluded when sandbox is not available.
 func (l *Loader) BuildPromptSectionForSkills(activeSkills []string) string {
 	available := l.availableSkills()
@@ -204,8 +213,8 @@ func (l *Loader) BuildPromptSectionForSkills(activeSkills []string) string {
 		return ""
 	}
 
-	// If no active skills specified, include all (legacy behavior).
-	includeAll := len(activeSkills) == 0
+	// nil means caller did not attempt matching → legacy include-all.
+	includeAll := activeSkills == nil
 	activeSet := make(map[string]bool, len(activeSkills))
 	for _, name := range activeSkills {
 		activeSet[name] = true
@@ -221,7 +230,7 @@ func (l *Loader) BuildPromptSectionForSkills(activeSkills []string) string {
 	for i := range available {
 		s := &available[i]
 		if includeAll || activeSet[s.Name] {
-			desc := s.Description
+			desc := s.promptDesc()
 			if s.IsMCPOnly() {
 				desc += "\n\n(MCP-only: use MCP tools directly, not skill_exec.)"
 			}

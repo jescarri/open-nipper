@@ -1380,6 +1380,10 @@ var skillKeywords = map[string][]string{
 }
 
 // matchSkillsByMessage returns skill names whose keywords match the user message.
+// It always returns a non-nil slice (possibly empty) to signal that matching was
+// attempted. A nil return means matching was not attempted (msg is nil).
+// BuildPromptSectionForSkills uses this distinction: nil → legacy include-all,
+// non-nil empty → all skills get slim 1-line summaries.
 func matchSkillsByMessage(allSkills []skills.Skill, msg *models.NipperMessage) []string {
 	if msg == nil {
 		return nil
@@ -1395,11 +1399,11 @@ func matchSkillsByMessage(allSkills []skills.Skill, msg *models.NipperMessage) [
 		}
 	}
 
+	matched := []string{} // non-nil: signals matching was attempted
 	if text == "" {
-		return nil
+		return matched
 	}
 
-	var matched []string
 	for _, s := range allSkills {
 		keywords, ok := skillKeywords[s.Name]
 		if !ok {
@@ -1551,40 +1555,15 @@ OUTPUT FORMATTING (CRITICAL):
 	}
 
 	// WhatsApp supports its own formatting subset that overlaps with (but is not)
-	// Markdown. The formatter in delivery.go is a safety net, but instructing the
-	// model to produce clean WhatsApp-native output reduces noise.
+	// Markdown. The formatting.WhatsApp() post-processor is the real safety net;
+	// this directive just nudges the model toward clean output to reduce churn.
 	if channelType == string(models.ChannelTypeWhatsApp) {
 		return `
 
-OUTPUT FORMATTING (CRITICAL — WhatsApp):
-Do NOT use Markdown. WhatsApp has its own formatting:
-
-ALLOWED (WhatsApp-native):
-- *bold* (single asterisks) for headings and key terms.
-- _italic_ (underscores) for subtle emphasis.
-- ~strikethrough~ (single tildes) for corrections.
-- ` + "`code`" + ` (backticks) for inline values, IDs, coordinates.
-- ` + "```" + `
-code block
-` + "```" + ` (triple backticks on own lines) for multi-line code.
-- > quote (greater-than at line start) for quotations.
-- - item (dash + space) for bullet lists.
-- 1. item (digit + dot + space) for numbered lists.
-- Raw URLs are auto-linked by WhatsApp: just write https://example.com
-
-FORBIDDEN (these break on WhatsApp):
-- Do NOT use **double asterisks** for bold.
-- Do NOT write the words 'bold' or 'italic'—only use the symbols * and _.
-- Do NOT use [text](url) or [url](url) link syntax. NEVER use square brackets with parentheses for links.
-  Output the naked URL on its own, e.g. https://www.google.com/maps?q=18.94,-103.89
-- Do NOT use # headers. Use *bold text* on its own line instead.
-- Do NOT use ---, ***, * * *, or any horizontal-rule dividers. Use blank lines.
-- Do NOT use * as a list bullet. Use - instead.
-
-STYLE:
-- Keep sections short with blank lines between them.
-- Use *bold* on its own line as a section heading.
-- Use - or numbered lists for structured data.`
+OUTPUT FORMAT: WhatsApp (no Markdown).
+Use: *bold* _italic_ ~strike~ ` + "`code`" + ` ` + "```" + `codeblock` + "```" + ` > quote - bullets 1. numbered
+Do NOT use: **bold** [links](url) # headers --- rules * bullets
+URLs: output raw (e.g. https://example.com) — WhatsApp auto-links them.`
 	}
 
 	// Other plaintext channels.

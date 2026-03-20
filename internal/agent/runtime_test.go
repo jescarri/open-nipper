@@ -365,7 +365,7 @@ func TestMatchSkillsByMessage(t *testing.T) {
 		name    string
 		msg     *models.NipperMessage
 		want    []string
-		wantNil bool
+		wantNil bool // only true when msg is nil (matching not attempted)
 	}{
 		{
 			name:    "nil message",
@@ -373,9 +373,9 @@ func TestMatchSkillsByMessage(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:    "empty text",
-			msg:     &models.NipperMessage{Content: models.MessageContent{Text: ""}},
-			wantNil: true,
+			name: "empty text",
+			msg:  &models.NipperMessage{Content: models.MessageContent{Text: ""}},
+			want: []string{}, // non-nil empty: matching attempted, nothing matched
 		},
 		{
 			name: "matches plant-care by keyword",
@@ -403,9 +403,9 @@ func TestMatchSkillsByMessage(t *testing.T) {
 			want: []string{"summarize_url"},
 		},
 		{
-			name:    "no keyword match",
-			msg:     &models.NipperMessage{Content: models.MessageContent{Text: "what is the meaning of life?"}},
-			wantNil: true,
+			name: "no keyword match",
+			msg:  &models.NipperMessage{Content: models.MessageContent{Text: "what is the meaning of life?"}},
+			want: []string{}, // non-nil empty: matching attempted, nothing matched
 		},
 		{
 			name: "case insensitive",
