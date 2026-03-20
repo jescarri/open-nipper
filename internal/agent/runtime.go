@@ -1744,6 +1744,50 @@ func (r *Runtime) buildModelCallback(sessionKey string, publisher *EventPublishe
 					zap.Int("assistantMultiParts", len(m.AssistantGenMultiContent)),
 				)
 			}
+
+			// Full readable prompt dump — only at debug level.
+			if r.logger.Core().Enabled(zap.DebugLevel) {
+				var dump strings.Builder
+				dump.WriteString("\n======== PROMPT SENT ==========\n")
+
+				// Tools section.
+				if len(input.Tools) > 0 {
+					dump.WriteString(fmt.Sprintf("\n--- TOOLS (%d) ---\n", len(input.Tools)))
+					for i, t := range input.Tools {
+						dump.WriteString(fmt.Sprintf("\n[%d] %s\n", i, t.Name))
+						dump.WriteString(fmt.Sprintf("    desc: %s\n", t.Desc))
+						if t.ParamsOneOf != nil {
+							if schema, err := json.MarshalIndent(t.ParamsOneOf, "    ", "  "); err == nil {
+								dump.WriteString(fmt.Sprintf("    params: %s\n", string(schema)))
+							}
+						}
+					}
+				}
+
+				// Messages section.
+				dump.WriteString(fmt.Sprintf("\n--- MESSAGES (%d) ---\n", len(input.Messages)))
+				for i, m := range input.Messages {
+					dump.WriteString(fmt.Sprintf("\n[%d] role=%s", i, m.Role))
+					if len(m.ToolCalls) > 0 {
+						dump.WriteString(fmt.Sprintf("  tool_calls=%d", len(m.ToolCalls)))
+					}
+					dump.WriteString("\n")
+
+					if m.Content != "" {
+						dump.WriteString(m.Content)
+						dump.WriteString("\n")
+					}
+					for _, tc := range m.ToolCalls {
+						dump.WriteString(fmt.Sprintf("  -> call: %s(%s)\n", tc.Function.Name, tc.Function.Arguments))
+					}
+					if len(m.UserInputMultiContent) > 0 {
+						dump.WriteString(fmt.Sprintf("  [%d multi-content parts]\n", len(m.UserInputMultiContent)))
+					}
+				}
+
+				dump.WriteString("\n++++++++ END PROMPT ==========\n")
+				r.logger.Debug(dump.String(), zap.String("sessionKey", sessionKey))
+			}
 			return cbCtx
 		},
 		OnEnd: func(cbCtx context.Context, info *einocallbacks.RunInfo, output *model.CallbackOutput) context.Context {
