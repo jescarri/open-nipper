@@ -2187,6 +2187,9 @@ func isGarbledOutput(content string) bool {
 	// Pattern 5: Line-based garbled ratio. If the majority of non-empty lines
 	// are mostly filler (punctuation/dots/invisible chars), the output is
 	// garbled even if a few lines contain real words or the tail is valid.
+	// Also counts "stub lines" — very short fragments (≤8 runes) that
+	// consist of 1-2 words like "The", "We", "Oops…", "Sorry…". These are
+	// hallmark debris from garbled model output and should count as filler.
 	if contentLen > 100 {
 		lines := strings.Split(trimmed, "\n")
 		nonEmptyLines := 0
@@ -2207,10 +2210,14 @@ func isGarbledOutput(content string) bool {
 			}
 			if lineTotal > 0 && lineMeaningful <= lineTotal/4 {
 				garbledLines++
+			} else if lineTotal <= 8 && lineMeaningful <= 6 {
+				// Stub line: short fragment like "The", "We", "Oops…",
+				// "Sorry…" — not garbled by rune ratio but not real content.
+				garbledLines++
 			}
 		}
-		if nonEmptyLines > 5 && garbledLines > nonEmptyLines*2/3 {
-			return true // majority of lines are garbled filler
+		if nonEmptyLines > 5 && garbledLines >= nonEmptyLines*2/3 {
+			return true // majority of lines are garbled filler or stubs
 		}
 	}
 

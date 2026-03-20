@@ -239,6 +239,11 @@ func TestIsGarbledOutput(t *testing.T) {
 			input: "The quick brown fox jumps over the lazy dog. This is a perfectly normal response with enough length to exercise the first-half check. It contains meaningful words, punctuation, and proper grammar throughout.",
 			want:  false,
 		},
+		{
+			name:  "gpt-oss garbled with reasoning leak and valid tail",
+			input: "**bold**...oops! Looks \u2026 \u2026 ... \u2026 ...\n\n\n\nOops! **...**\n\n\n\n?\n\n\n\nOops\u2026 \n\n\n\n...\n\n\n\n...\n\n\n\n?\n\n\n\n... \n\nSorry\u2026 \n\nWe **...** \n\nWe\u2026 \n\n\u2026\n\n\n--- \n\nThe \n\n\nWe \n\n\n\u2026\n\n\u200B\n\nIt seems the tool call succeeded but the response wasn't properly formatted. I need to inform the user that the office lights have been turned off. Use WhatsApp style, emojis, etc.*turning off the office lights* \U0001f4a1\U0001f526\n\nDone! The office is now as dark as a robot's soul after a night of cheap whiskey. \U0001f37b\U0001f5a4",
+			want:  true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -528,6 +533,11 @@ func TestSalvageCleanSuffix(t *testing.T) {
 			input:   "… … … ...\n\n…  ...\n\n—",
 			wantNil: true,
 		},
+		{
+			name:  "gpt-oss garbled with reasoning leak salvages clean tail",
+			input: "**bold**...oops! Looks \u2026 \u2026 ... \u2026 ...\n\n\n\nOops! **...**\n\n\n\n?\n\n\n\nOops\u2026 \n\n\n\n...\n\n\n\n...\n\n\n\n?\n\n\n\n... \n\nSorry\u2026 \n\nWe **...** \n\nWe\u2026 \n\n\u2026\n\n\n--- \n\nThe \n\n\nWe \n\n\n\u2026\n\n\u200B\n\nIt seems the tool call succeeded but the response wasn't properly formatted. I need to inform the user that the office lights have been turned off. Use WhatsApp style, emojis, etc.*turning off the office lights* \U0001f4a1\U0001f526\n\nDone! The office is now as dark as a robot's soul after a night of cheap whiskey. \U0001f37b\U0001f5a4",
+			want: "Done! The office is now as dark as a robot's soul after a night of cheap whiskey. \U0001f37b\U0001f5a4",
+		},
 	}
 
 	for _, tt := range tests {
@@ -560,6 +570,12 @@ func TestIsReasoningNarration(t *testing.T) {
 		{"Here is the weather forecast.", false},
 		{"I turned off the lights for you.", false}, // starts with "I " not "I need"
 		{"The tool responded success.", true},
+		{"It seems the tool call succeeded but the response wasn't properly formatted.", true},
+		{"It looks like the action completed successfully.", true},
+		{"It appears that we need to send a confirmation.", true},
+		{"The tool call returned a success response.", true},
+		{"Use WhatsApp style, emojis, etc.", true},
+		{"The user is asking to turn off the lights.", true},
 	}
 
 	for _, tt := range tests {
