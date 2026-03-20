@@ -809,31 +809,61 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 	var mcpCatalog []tools.ToolCatalogEntry
 
 	if leanMode {
-		// Lean MCP mode: pre-filter MCP tools using keyword matching on the user message.
-		// This avoids a Phase 1 LLM round-trip — the runtime resolves tools directly.
-		// If no tools match the message, all MCP tools are included as fallback.
+		// Lean MCP mode: resolve only the MCP tools needed for this message.
+		// Three sources of tool names, merged in priority order:
+		//   1. Keyword matching on MCP tool names/descriptions vs user message
+		//   2. Activated skills' mcp_tools declarations (e.g. plant-care → GetLiveContext)
+		//   3. Fallback: bind ALL MCP tools if nothing else matched (graceful degradation)
 		mcpCatalog = r.buildMCPToolCatalog()
 		matcher := &tools.KeywordToolMatcher{}
 		userText := ""
 		if msg != nil {
 			userText = msg.Content.Text
 		}
+
+		// Source 1: keyword match against MCP tool catalog.
 		matched, _ := matcher.Match(ctx, userText, mcpCatalog, 10)
+
+		// Source 2: activated skills declare mcp_tools they need.
+		if r.skillsLoader != nil {
+			activeSkillNames := matchSkillsByMessage(r.skillsLoader.AvailableSkills(), msg)
+			for _, skillName := range activeSkillNames {
+				if skill, ok := r.skillsLoader.SkillByName(skillName); ok {
+					for _, toolName := range skill.MCPToolNames() {
+						matched = append(matched, toolName)
+					}
+				}
+			}
+		}
+
+		// Deduplicate matched tool names.
+		if len(matched) > 0 {
+			seen := make(map[string]bool, len(matched))
+			deduped := matched[:0]
+			for _, name := range matched {
+				if !seen[name] {
+					seen[name] = true
+					deduped = append(deduped, name)
+				}
+			}
+			matched = deduped
+		}
+
 		if len(matched) > 0 {
 			agentTools = r.resolvedTools(matched)
-			r.logger.Info("lean MCP mode: resolved tools from user message",
+			r.logger.Info("lean MCP mode: resolved tools",
 				zap.String("sessionKey", msg.SessionKey),
 				zap.Int("nativeCount", len(r.tools)),
 				zap.Int("mcpMatched", len(matched)),
 				zap.Strings("matched", matched),
 			)
 		} else {
-			// Fallback: no keyword match — include search_tools so LLM can discover.
-			agentTools = r.leanTools(mcpCatalog)
-			r.logger.Debug("lean MCP mode: no keyword match, using search_tools",
+			// Fallback: no matches from keywords or skills — bind ALL MCP tools.
+			// This is the safe path: same as lean_mcp_tools=false.
+			agentTools = r.currentTools()
+			r.logger.Warn("lean MCP mode: no tools matched, falling back to all MCP tools",
 				zap.String("sessionKey", msg.SessionKey),
-				zap.Int("nativeCount", len(r.tools)),
-				zap.Int("mcpCatalogSize", len(mcpCatalog)),
+				zap.Int("totalTools", len(agentTools)),
 			)
 		}
 	} else {
@@ -1485,8 +1515,8 @@ func (r *Runtime) appendToolHints(base string, msg *models.NipperMessage) (strin
 
 	leanMode := r.cfg.Inference.LeanMCPTools && len(mcpInfos) > 0
 	if leanMode {
-		// In lean mode, add search_tools instead of individual MCP tool names.
-		toolNames = append(toolNames, "search_tools")
+		// In lean mode, MCP tools are resolved at runtime — no need to list them
+		// in the tool names. The catalog below helps the LLM understand what's available.
 	} else {
 		// Legacy: list all MCP tool names inline.
 		for _, ti := range mcpInfos {
@@ -1551,20 +1581,6 @@ func (r *Runtime) buildMCPToolCatalog() []tools.ToolCatalogEntry {
 		})
 	}
 	return catalog
-}
-
-// leanTools returns native tools + search_tools (no MCP tools bound).
-// Used as the Phase 1 tool set in lean MCP mode.
-func (r *Runtime) leanTools(catalog []tools.ToolCatalogEntry) []einotool.BaseTool {
-	searchTool, err := tools.BuildSearchToolsTool(catalog, &tools.KeywordToolMatcher{})
-	if err != nil {
-		r.logger.Error("failed to build search_tools", zap.Error(err))
-		return r.tools // fallback to native only
-	}
-	out := make([]einotool.BaseTool, 0, len(r.tools)+1)
-	out = append(out, r.tools...)
-	out = append(out, searchTool)
-	return out
 }
 
 // resolvedTools returns native tools + only the named MCP tools.

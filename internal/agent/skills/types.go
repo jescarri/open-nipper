@@ -20,6 +20,7 @@ type SkillConfig struct {
 	Version     string           `yaml:"version"`
 	Description string           `yaml:"description"`
 	PromptHint  string           `yaml:"prompt_hint"` // compact LLM-facing summary; used instead of full SKILL.md when present
+	MCPTools    []string         `yaml:"mcp_tools"`   // MCP tool names this skill requires (e.g. ["GetLiveContext", "HassTurnOn"])
 	Type        string           `yaml:"type"`        // "script" (default) | "mcp" — mcp = no script, use MCP tools only
 	Runtime     string           `yaml:"runtime"`     // "bash" | "node" | "python"
 	Entrypoint  string           `yaml:"entrypoint"`  // e.g. "scripts/run.sh"
@@ -52,6 +53,15 @@ func (s *Skill) promptDesc() string {
 		return s.Config.PromptHint
 	}
 	return s.Description
+}
+
+// MCPToolNames returns the MCP tool names this skill declares as dependencies.
+// Used by lean MCP mode to bind the right tools when a skill is activated.
+func (s *Skill) MCPToolNames() []string {
+	if s.Config == nil || len(s.Config.MCPTools) == 0 {
+		return nil
+	}
+	return s.Config.MCPTools
 }
 
 // IsMCPOnly returns true if this skill has no runnable script and should be used via MCP tools only.
