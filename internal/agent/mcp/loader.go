@@ -503,6 +503,49 @@ func (l *Loader) reconnectClient(idx int) error {
 	return nil
 }
 
+// triggerReconnect initiates a synchronous reconnect for the server at idx.
+// It blocks until reconnection succeeds or permanently fails (backoff capped
+// at ~10s total wait to avoid blocking the tool call too long).
+func (l *Loader) triggerReconnect(idx int) {
+	const maxWait = 10 * time.Second
+	ctx, cancel := context.WithTimeout(l.ctx, maxWait)
+	defer cancel()
+
+	l.mu.RLock()
+	if idx >= len(l.clients) {
+		l.mu.RUnlock()
+		return
+	}
+	name := l.clients[idx].name
+	l.mu.RUnlock()
+
+	l.logger.Info("on-demand MCP reconnect triggered", zap.String("server", name))
+
+	backoff := reconnectInitialDelay
+	for attempt := 1; ; attempt++ {
+		if err := l.reconnectClient(idx); err != nil {
+			l.logger.Warn("on-demand reconnect attempt failed",
+				zap.String("server", name),
+				zap.Int("attempt", attempt),
+				zap.Error(err),
+			)
+			select {
+			case <-ctx.Done():
+				l.logger.Error("on-demand reconnect timed out", zap.String("server", name))
+				return
+			case <-time.After(backoff):
+			}
+			backoff = min(backoff*2, 4*time.Second)
+			continue
+		}
+		l.logger.Info("on-demand MCP reconnect succeeded",
+			zap.String("server", name),
+			zap.Int("attempts", attempt),
+		)
+		return
+	}
+}
+
 // connectStdioAsync connects STDIO MCP servers in the background. Each server
 // is given stdioConnectTimeout to start and complete the initialize handshake.
 // When a server connects, its tools are merged via reloadTools. Loader.ctx
@@ -683,9 +726,10 @@ func (l *Loader) reloadTools(ctx context.Context) error {
 	copy(snapshot, l.clients)
 	l.mu.RUnlock()
 
-	var newTools []tool.BaseTool
+	serverToolSlices := make([][]tool.BaseTool, len(snapshot))
+	var totalTools int
 	var failures int
-	for _, mc := range snapshot {
+	for i, mc := range snapshot {
 		if mc.session == nil {
 			continue
 		}
@@ -718,27 +762,44 @@ func (l *Loader) reloadTools(ctx context.Context) error {
 			)
 		}
 
-		newTools = append(newTools, mcpTools...)
+		serverToolSlices[i] = mcpTools
+		totalTools += len(mcpTools)
 	}
 
 	// If ALL servers failed, keep existing tools rather than clearing them.
-	if failures > 0 && len(newTools) == 0 {
+	if failures > 0 && totalTools == 0 {
 		l.logger.Warn("all MCP servers failed tool reload; keeping previous tool set",
 			zap.Int("failures", failures),
 		)
 		return fmt.Errorf("all %d MCP servers failed to reload tools", failures)
 	}
 
-	newTools = WrapTools(newTools, l.logger)
+	// Wrap each server's tools with its own reconnect callback.
+	var wrappedTools []tool.BaseTool
+	for serverIdx, mc := range snapshot {
+		if mc.session == nil {
+			continue
+		}
+		// Collect the tools that came from this server.
+		serverTools := serverToolSlices[serverIdx]
+		if len(serverTools) == 0 {
+			continue
+		}
+		idx := serverIdx // capture for closure
+		reconnectFn := func() {
+			l.triggerReconnect(idx)
+		}
+		wrappedTools = append(wrappedTools, WrapTools(serverTools, l.logger, reconnectFn)...)
+	}
 
 	l.mu.Lock()
-	l.tools = newTools
+	l.tools = wrappedTools
 	l.mu.Unlock()
 
 	if failures > 0 {
 		l.logger.Warn("tool reload completed with partial failures",
 			zap.Int("failures", failures),
-			zap.Int("totalTools", len(newTools)),
+			zap.Int("totalTools", len(wrappedTools)),
 		)
 	}
 

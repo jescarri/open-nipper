@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 
@@ -72,14 +74,14 @@ func sanitizeToolCallJSON(raw string) string {
 //     validation, transport, etc.) it is converted into a successful tool
 //     result string so the ReAct loop can read the error and self-correct
 //     instead of crashing with a NodeRunError.
-func WrapTools(tools []tool.BaseTool, logger *zap.Logger) []tool.BaseTool {
+func WrapTools(tools []tool.BaseTool, logger *zap.Logger, reconnectFn func()) []tool.BaseTool {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	out := make([]tool.BaseTool, len(tools))
 	for i, t := range tools {
 		if inv, ok := t.(tool.InvokableTool); ok {
-			out[i] = &resilientMCPTool{inner: inv, logger: logger}
+			out[i] = &resilientMCPTool{inner: inv, logger: logger, reconnectFn: reconnectFn}
 		} else {
 			out[i] = t
 		}
@@ -88,8 +90,9 @@ func WrapTools(tools []tool.BaseTool, logger *zap.Logger) []tool.BaseTool {
 }
 
 type resilientMCPTool struct {
-	inner  tool.InvokableTool
-	logger *zap.Logger
+	inner       tool.InvokableTool
+	logger      *zap.Logger
+	reconnectFn func() // triggers reconnect for this tool's MCP server
 }
 
 func (r *resilientMCPTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
@@ -112,6 +115,28 @@ func (r *resilientMCPTool) InvokableRun(ctx context.Context, argumentsInJSON str
 
 	result, err := r.inner.InvokableRun(ctx, normalized, opts...)
 	if err != nil {
+		// Connection/transport errors: trigger reconnect and retry once.
+		if isConnectionError(err) && r.reconnectFn != nil {
+			r.logger.Warn("MCP connection error detected, triggering reconnect",
+				zap.String("tool", name),
+				zap.Error(err),
+			)
+			r.reconnectFn()
+
+			// Retry once with the (hopefully) fresh session.
+			result, err = r.inner.InvokableRun(ctx, normalized, opts...)
+			if err != nil {
+				r.logger.Error("MCP tool retry after reconnect failed",
+					zap.String("tool", name),
+					zap.Error(err),
+				)
+				return `{"error":"MCP connection lost and reconnection failed. Do NOT retry this tool — inform the user the service is temporarily unavailable."}`, nil
+			}
+			r.logger.Info("MCP tool retry after reconnect succeeded", zap.String("tool", name))
+			return r.capResult(name, result), nil
+		}
+
+		// Normal error softening (bad params, server-side validation, etc.).
 		r.logger.Warn("MCP tool invocation error softened",
 			zap.String("tool", name),
 			zap.Error(err),
@@ -121,15 +146,35 @@ func (r *resilientMCPTool) InvokableRun(ctx context.Context, argumentsInJSON str
 			err.Error(),
 		), nil
 	}
+	return r.capResult(name, result), nil
+}
+
+// capResult truncates oversized results.
+func (r *resilientMCPTool) capResult(name, result string) string {
 	if len(result) > maxToolResultBytes {
 		r.logger.Warn("truncating oversized MCP tool result",
 			zap.String("tool", name),
 			zap.Int("originalBytes", len(result)),
 			zap.Int("cappedBytes", maxToolResultBytes),
 		)
-		result = result[:maxToolResultBytes] + "\n...[truncated — result too large]"
+		return result[:maxToolResultBytes] + "\n...[truncated — result too large]"
 	}
-	return result, nil
+	return result
+}
+
+// isConnectionError returns true if the error indicates a transport/connection
+// failure rather than a logical tool error. These warrant a reconnect attempt.
+func isConnectionError(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "client is closing") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "transport has been closed")
 }
 
 // normalizeArgs fixes common model mistakes in tool call arguments:
