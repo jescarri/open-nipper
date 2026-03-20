@@ -829,9 +829,7 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 			activeSkillNames := matchSkillsByMessage(r.skillsLoader.AvailableSkills(), msg)
 			for _, skillName := range activeSkillNames {
 				if skill, ok := r.skillsLoader.SkillByName(skillName); ok {
-					for _, toolName := range skill.MCPToolNames() {
-						matched = append(matched, toolName)
-					}
+					matched = append(matched, skill.MCPToolNames()...)
 				}
 			}
 		}
@@ -2294,6 +2292,11 @@ func isReasoningNarration(line string) bool {
 		"the user sent",
 		"the user asked",
 		"the user wants",
+		"the user is",
+		"the user has",
+		"the user gave",
+		"the user said",
+		"the user requested",
 		"we need to",
 		"we should",
 		"we fetched",
@@ -2314,7 +2317,14 @@ func isReasoningNarration(line string) bool {
 		"next, i",
 		"the tool responded",
 		"the tool returned",
+		"the tool call",
+		"the tool succeeded",
 		"now we must",
+		"it seems the",
+		"it seems like",
+		"it looks like",
+		"it appears that",
+		"use whatsapp",
 	}
 	for _, prefix := range narrationPrefixes {
 		if strings.HasPrefix(lower, prefix) {
