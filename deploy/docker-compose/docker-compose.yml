@@ -91,6 +91,12 @@ services:
       - agent_data:/data
       # Mount the Docker socket so the agent can create sandbox containers.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Skills: use the SAME absolute host path inside the container.
+      # The sandbox manager passes this path to `docker run -v`, and Docker
+      # resolves it on the HOST (DooD), not inside this container.
+      # Set skills.path in agent.yaml to the same absolute path.
+      # Example:
+      #   - /home/ubuntu/deploy/skills:/home/ubuntu/deploy/skills:ro
     env_file:
       - .env.agent
     depends_on:

@@ -4,12 +4,65 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 )
+
+// specialTokenRe matches chat-template special tokens leaked by local models
+// (e.g. <|end|>, <|start|>, <|channel|>, <|message|>, <|constrain|>).
+var specialTokenRe = regexp.MustCompile(`<\|[^|]*\|>`)
+
+// sanitizeToolCallJSON fixes common JSON corruption from open-source models:
+//  1. Strips trailing chat-template tokens appended after the JSON closing brace
+//     (e.g. }<|end|><|start|>assistant<|channel|>analysis<|message|>...).
+//  2. Fixes escaped quotes inside JSON keys/values that some models produce
+//     (e.g. "start_time\":\"2026-03-20T14:00:00\" → "start_time":"2026-03-20T14:00:00").
+//
+// Returns the cleaned JSON string for parsing.
+func sanitizeToolCallJSON(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return s
+	}
+
+	// 1. Truncate at first special token marker outside a JSON string context.
+	// Find the last '}' or ']' to identify where the JSON object/array ends,
+	// then discard everything after it.
+	lastBrace := strings.LastIndexAny(s, "}]")
+	if lastBrace >= 0 && lastBrace < len(s)-1 {
+		tail := s[lastBrace+1:]
+		if specialTokenRe.MatchString(tail) {
+			s = s[:lastBrace+1]
+		}
+	}
+
+	// 2. Fix escaped quotes pattern: \" inside the raw JSON that shouldn't be escaped.
+	// GPT-OSS models produce keys like: "start_time\": \"2026-03-20T14:00:00-07:00\"
+	// which after JSON parsing creates a single key containing the value.
+	// Try parsing first; only apply the fix if parsing fails.
+	var probe map[string]any
+	if json.Unmarshal([]byte(s), &probe) == nil {
+		return s // valid JSON, no fix needed
+	}
+
+	// Replace \" with " and re-validate. The pattern is typically:
+	//   "key\": \"value\"  →  "key": "value"
+	// We only replace backslash-quote sequences that appear outside already-valid strings.
+	fixed := strings.ReplaceAll(s, `\"`, `"`)
+	// After replacement we may have doubled quotes ("") at key boundaries; fix those too.
+	fixed = strings.ReplaceAll(fixed, `""`, `"`)
+
+	if json.Unmarshal([]byte(fixed), &probe) == nil {
+		return fixed
+	}
+
+	// If still invalid, return the original (normalizeArgs will handle the parse failure).
+	return s
+}
 
 // WrapTools applies two resilience layers around each MCP InvokableTool:
 //
@@ -93,9 +146,18 @@ func (r *resilientMCPTool) normalizeArgs(info *schema.ToolInfo, argsJSON string)
 		return argsJSON
 	}
 
+	// Sanitize corrupted JSON from local models (escaped quotes, trailing special tokens).
+	sanitized := sanitizeToolCallJSON(argsJSON)
+	if sanitized != argsJSON {
+		r.logger.Debug("sanitized tool call JSON",
+			zap.Int("originalLen", len(argsJSON)),
+			zap.Int("sanitizedLen", len(sanitized)),
+		)
+	}
+
 	var args map[string]any
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return argsJSON
+	if err := json.Unmarshal([]byte(sanitized), &args); err != nil {
+		return argsJSON // return original on parse failure
 	}
 
 	changed := false

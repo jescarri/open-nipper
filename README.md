@@ -290,6 +290,31 @@ agent:
     - /var/run/docker.sock:/var/run/docker.sock
 ```
 
+### Skills volume mount caveat (DooD)
+
+Because sandbox containers are siblings of the agent container (not children), volume mounts are resolved by the **host Docker daemon**, not from inside the agent container. This means `skills.path` in the agent config must be a path that exists **on the host**.
+
+If the agent container mounts skills at an internal path (e.g. `/data/skills`), the sandbox manager will pass `-v /data/skills:/skills:ro` to Docker, but Docker resolves `/data/skills` on the **host** where that path does not exist.
+
+**Fix:** Mount skills using the same absolute path on both the host and inside the agent container:
+
+```yaml
+# docker-compose.yml
+agent:
+  volumes:
+    - /home/ubuntu/deploy/skills:/home/ubuntu/deploy/skills:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+```
+
+```yaml
+# agent.yaml
+skills:
+  enabled: true
+  path: "/home/ubuntu/deploy/skills"   # same path as host mount
+```
+
+This ensures the path the sandbox manager passes to `docker run -v` is resolvable by the host daemon. The same caveat applies to any `volume_mounts` in the sandbox config.
+
 ### Security considerations
 
 - Mounting the Docker socket grants the agent container the ability to manage containers on the host. This is equivalent to root access on the host.

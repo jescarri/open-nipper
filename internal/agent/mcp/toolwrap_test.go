@@ -192,6 +192,64 @@ func TestNormalizeArgs_StripsUnknownParameters(t *testing.T) {
 	}
 }
 
+func TestSanitizeToolCallJSON_EscapedQuotes(t *testing.T) {
+	// GPT-OSS produces: "start_time\":\"2026-03-20T14:00:00-07:00\",\"end_time\":\"..."
+	input := `{"action":"create","user_google_email":"jesuscarrillo8@gmail.com","summary":"Let's go to Seattle","start_time\":\"2026-03-20T14:00:00-07:00\",\"end_time\":\"2026-03-20T22:00:00-07:00\",\"attendees\":[\"herrera8607@gmail.com\"]}`
+	got := sanitizeToolCallJSON(input)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("sanitized JSON should be valid, got parse error: %v\nJSON: %s", err, got)
+	}
+
+	if parsed["start_time"] != "2026-03-20T14:00:00-07:00" {
+		t.Errorf("start_time = %v, want 2026-03-20T14:00:00-07:00", parsed["start_time"])
+	}
+	if parsed["end_time"] != "2026-03-20T22:00:00-07:00" {
+		t.Errorf("end_time = %v, want 2026-03-20T22:00:00-07:00", parsed["end_time"])
+	}
+}
+
+func TestSanitizeToolCallJSON_TrailingSpecialTokens(t *testing.T) {
+	input := `{"action":"create","summary":"test"}<|end|><|start|>assistant<|channel|>analysis<|message|>some reasoning`
+	got := sanitizeToolCallJSON(input)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("sanitized JSON should be valid, got parse error: %v\nJSON: %s", err, got)
+	}
+	if parsed["action"] != "create" {
+		t.Errorf("action = %v, want create", parsed["action"])
+	}
+}
+
+func TestSanitizeToolCallJSON_BothEscapedAndTokens(t *testing.T) {
+	input := `{"action":"create","summary":"Let's go","start_time\":\"2026-03-20T14:00:00-07:00\",\"end_time\":\"2026-03-20T22:00:00-07:00\"}<|end|><|start|>assistant<|channel|>analysis<|message|>oops`
+	got := sanitizeToolCallJSON(input)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("sanitized JSON should be valid, got parse error: %v\nJSON: %s", err, got)
+	}
+	if parsed["start_time"] != "2026-03-20T14:00:00-07:00" {
+		t.Errorf("start_time = %v", parsed["start_time"])
+	}
+}
+
+func TestSanitizeToolCallJSON_ValidJSONUntouched(t *testing.T) {
+	input := `{"action":"create","start_time":"2026-03-20T14:00:00-07:00"}`
+	got := sanitizeToolCallJSON(input)
+	if got != input {
+		t.Errorf("valid JSON should not be modified, got %s", got)
+	}
+}
+
+func TestSanitizeToolCallJSON_EmptyString(t *testing.T) {
+	if got := sanitizeToolCallJSON(""); got != "" {
+		t.Errorf("empty input should return empty, got %q", got)
+	}
+}
+
 func TestNormalizeArgs_DoesNotInjectStringDefaults(t *testing.T) {
 	inner := &stubMCPTool{
 		info:      createNoteToolInfo(),
