@@ -53,10 +53,10 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a Scheduler. Jobs are not started until Start is called.
-// loc sets the timezone for cron expressions; if nil, time.UTC is used.
+// loc sets the timezone for cron expressions; if nil, the system local timezone is used.
 func NewScheduler(logger *zap.Logger, loc *time.Location) *Scheduler {
 	if loc == nil {
-		loc = time.UTC
+		loc = time.Local
 	}
 	return &Scheduler{
 		cron:     cron.New(cron.WithSeconds(), cron.WithLocation(loc)),

@@ -386,6 +386,13 @@ func (r *Runtime) Run(ctx context.Context, conn *amqp.Connection) error {
 				return ctx.Err()
 			default:
 				r.logger.Warn("consume loop error, reconnecting", zap.Error(err))
+
+				// If the underlying connection is closed, return immediately so the
+				// outer loop (cli/agent.go) can re-register and dial a fresh connection.
+				if conn.IsClosed() {
+					return fmt.Errorf("AMQP connection closed: %w", err)
+				}
+
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
