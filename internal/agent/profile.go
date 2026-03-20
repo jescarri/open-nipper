@@ -21,6 +21,8 @@ type UserProfile struct {
 	Language    string    `json:"language"`
 	Latitude    string    `json:"latitude,omitempty"`
 	Longitude   string    `json:"longitude,omitempty"`
+	Email       string    `json:"email,omitempty"`
+	Calendar    string    `json:"calendar,omitempty"`
 	ConfiguredAt time.Time `json:"configuredAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
@@ -73,6 +75,21 @@ var profileFields = []profileField{
 		Get:   func(p *UserProfile) string { return p.Longitude },
 		Set:   func(p *UserProfile, v string) { p.Longitude = v },
 	},
+	{
+		Label: "Email",
+		Get:   func(p *UserProfile) string { return p.Email },
+		Set:   func(p *UserProfile, v string) { p.Email = v },
+	},
+	{
+		Label: "Calendar",
+		Get:   func(p *UserProfile) string { return p.Calendar },
+		Set: func(p *UserProfile, v string) {
+			if v == "" {
+				v = "primary"
+			}
+			p.Calendar = v
+		},
+	},
 }
 
 // profileFieldAliases maps user-facing short names to the profileFields index.
@@ -106,6 +123,12 @@ var profileFieldAliases = map[string]int{
 	"lon":         7,
 	"lng":         7,
 	"8":           7,
+	"email":       8,
+	"mail":        8,
+	"9":           8,
+	"calendar":    9,
+	"cal":         9,
+	"10":          9,
 }
 
 // coordinatesAliases are special compound field names handled outside the
@@ -200,7 +223,8 @@ func SaveProfile(basePath, userID string, p *UserProfile) error {
 func (p *UserProfile) IsEmpty() bool {
 	return p.UserName == "" && p.AgentName == "" && p.Personality == "" &&
 		p.Location == "" && p.SkillLevel == "" && p.Language == "" &&
-		p.Latitude == "" && p.Longitude == ""
+		p.Latitude == "" && p.Longitude == "" &&
+		p.Email == "" && p.Calendar == ""
 }
 
 // FormatDisplay returns a human-readable listing of the profile suitable for
@@ -225,6 +249,8 @@ func (p *UserProfile) FormatDisplay() string {
 	sb.WriteString("  /setup skill <beginner|intermediate|advanced|expert>\n")
 	sb.WriteString("  /setup language <preferred language>\n")
 	sb.WriteString("  /setup coords <lat,lon> (e.g., 45.49,-75.66)\n")
+	sb.WriteString("  /setup email <your@email.com>\n")
+	sb.WriteString("  /setup calendar <calendar id> (default: primary)\n")
 	sb.WriteString("\nYou can also use the field number: /setup 1 Jane Doe")
 	return sb.String()
 }
@@ -260,6 +286,14 @@ func (p *UserProfile) FormatForPrompt() string {
 	if p.Latitude != "" && p.Longitude != "" {
 		sb.WriteString(fmt.Sprintf("- Coordinates: %s, %s (use these for weather and location-based tools)\n", p.Latitude, p.Longitude))
 	}
+	if p.Email != "" {
+		sb.WriteString(fmt.Sprintf("- Email: %s (use this as the user's email for Gmail, calendar, and other integrations)\n", p.Email))
+	}
+	cal := p.Calendar
+	if cal == "" {
+		cal = "primary"
+	}
+	sb.WriteString(fmt.Sprintf("- Calendar: %s (use this as the calendar ID for calendar operations)\n", cal))
 
 	return sb.String()
 }

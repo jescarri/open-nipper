@@ -323,7 +323,7 @@ func (r *Runtime) cmdSetup(userID, args string) *CommandResult {
 		return &CommandResult{
 			Handled: true,
 			Response: fmt.Sprintf(
-				"Unknown field: *%s*\n\nValid fields: name, agent, personality, location, skill, language, lat, lon, coords (or 1-8).",
+				"Unknown field: *%s*\n\nValid fields: name, agent, personality, location, skill, language, lat, lon, coords, email, calendar (or 1-10).",
 				fieldKey,
 			),
 		}
