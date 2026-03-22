@@ -358,6 +358,10 @@ type SandboxConfig struct {
 	SkillsPath string `yaml:"skills_path" mapstructure:"skills_path"`
 	// ReadOnly runs the container root filesystem in read-only mode when true (default). Set false to allow writes outside tmpfs.
 	ReadOnly bool `yaml:"read_only" mapstructure:"read_only"`
+	// ExtraCapabilities lists additional Linux capabilities to grant the sandbox container
+	// beyond the default set (SETUID, SETGID, CHOWN, FOWNER, DAC_OVERRIDE).
+	// Example: ["NET_RAW"] to allow raw sockets for nmap/ping.
+	ExtraCapabilities []string `yaml:"extra_capabilities" mapstructure:"extra_capabilities"`
 }
 
 // PromptConfig holds system prompt and compaction settings.

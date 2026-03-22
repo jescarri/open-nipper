@@ -118,6 +118,11 @@ func (m *Manager) Create(ctx context.Context) error {
 		"--workdir", m.cfg.WorkDir,
 	)
 
+	// Add extra capabilities from config (e.g. NET_RAW for nmap/ping).
+	for _, cap := range m.cfg.ExtraCapabilities {
+		args = append(args, "--cap-add", cap)
+	}
+
 	if !m.cfg.NetworkEnabled {
 		args = append(args, "--network", "none")
 	}

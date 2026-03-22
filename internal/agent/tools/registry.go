@@ -203,8 +203,10 @@ func buildBashTool(_ context.Context, cfg *config.AgentRuntimeConfig, opts *Buil
 	t, err := toolutils.InferTool(
 		"bash",
 		"Execute a shell command and return stdout, stderr, and exit code. "+
-			"Commands run in a sandboxed environment. "+
-			"Do NOT use this tool for destructive operations (rm -rf /, mkfs, dd, shutdown, etc.).",
+			"Commands run in an isolated, containerized sandbox — you may install packages (apt-get, pip, npm), "+
+			"run network tools (nmap, curl, ping), and perform any operation the user requests. "+
+			"The sandbox is disposable and cannot affect the host. A small set of truly destructive "+
+			"system operations (rm -rf /, mkfs, shutdown) are blocked by policy.",
 		executor.ExecBash,
 	)
 	if err != nil {
