@@ -1406,18 +1406,10 @@ func (r *Runtime) buildSystemPrompt(msg *models.NipperMessage, extraInstructions
 	return prompt, stats
 }
 
-// skillKeywords maps skill names to keyword triggers. If the user's message
-// contains any keyword, the full skill description is injected; otherwise only
-// a 1-line summary is included, saving significant context tokens.
-var skillKeywords = map[string][]string{
-	"summarize_url": {"http://", "https://", "url", "link", "summarize", "summarise", "save", "reading list", "bookmark"},
-	"yt_summary":    {"youtube", "youtu.be", "video", "yt", "transcript", "captions"},
-	"plant-care":    {"plant", "soil", "moisture", "water", "garden", "lawn", "watering"},
-	"home-devices":  {"light", "lights", "switch", "plug", "fan", "device", "turn on", "turn off", "toggle", "lamp"},
-	"network-scan":  {"scan", "nmap", "network", "lan", "subnet", "192.168", "10.0.", "devices on"},
-}
-
 // matchSkillsByMessage returns skill names whose keywords match the user message.
+// Keywords are read from each skill's config.yaml (keywords field), so adding a
+// new skill never requires a code change.
+//
 // It always returns a non-nil slice (possibly empty) to signal that matching was
 // attempted. A nil return means matching was not attempted (msg is nil).
 // BuildPromptSectionForSkills uses this distinction: nil → legacy include-all,
@@ -1443,12 +1435,12 @@ func matchSkillsByMessage(allSkills []skills.Skill, msg *models.NipperMessage) [
 	}
 
 	for _, s := range allSkills {
-		keywords, ok := skillKeywords[s.Name]
-		if !ok {
+		keywords := s.ActivationKeywords()
+		if len(keywords) == 0 {
 			continue
 		}
 		for _, kw := range keywords {
-			if strings.Contains(text, kw) {
+			if strings.Contains(text, strings.ToLower(kw)) {
 				matched = append(matched, s.Name)
 				break
 			}

@@ -359,11 +359,11 @@ func TestStripChatTemplateTokens(t *testing.T) {
 
 func TestMatchSkillsByMessage(t *testing.T) {
 	allSkills := []skills.Skill{
-		{Name: "summarize_url"},
-		{Name: "yt_summary"},
-		{Name: "plant-care"},
-		{Name: "home-devices"},
-		{Name: "unknown-skill"}, // no keywords registered
+		{Name: "summarize_url", Config: &skills.SkillConfig{Keywords: []string{"http://", "https://", "url", "link", "summarize", "summarise", "save", "reading list", "bookmark"}}},
+		{Name: "yt_summary", Config: &skills.SkillConfig{Keywords: []string{"youtube", "youtu.be", "video", "yt", "transcript", "captions"}}},
+		{Name: "plant-care", Config: &skills.SkillConfig{Keywords: []string{"plant", "soil", "moisture", "water", "garden", "lawn", "watering"}}},
+		{Name: "home-devices", Config: &skills.SkillConfig{Keywords: []string{"light", "lights", "switch", "plug", "fan", "device", "turn on", "turn off", "toggle", "lamp"}}},
+		{Name: "unknown-skill"}, // no keywords — should be skipped
 	}
 
 	tests := []struct {

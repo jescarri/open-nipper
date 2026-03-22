@@ -21,6 +21,7 @@ type SkillConfig struct {
 	Description string           `yaml:"description"`
 	PromptHint  string           `yaml:"prompt_hint"` // compact LLM-facing summary; used instead of full SKILL.md when present
 	MCPTools    []string         `yaml:"mcp_tools"`   // MCP tool names this skill requires (e.g. ["GetLiveContext", "HassTurnOn"])
+	Keywords    []string         `yaml:"keywords"`    // keyword triggers that activate this skill's full prompt (e.g. ["scan", "nmap", "network"])
 	Type        string           `yaml:"type"`        // "script" (default) | "mcp" — mcp = no script, use MCP tools only
 	Runtime     string           `yaml:"runtime"`     // "bash" | "node" | "python"
 	Entrypoint  string           `yaml:"entrypoint"`  // e.g. "scripts/run.sh"
@@ -53,6 +54,15 @@ func (s *Skill) promptDesc() string {
 		return s.Config.PromptHint
 	}
 	return s.Description
+}
+
+// ActivationKeywords returns the keywords that trigger this skill's full prompt injection.
+// Returns nil if no keywords are configured.
+func (s *Skill) ActivationKeywords() []string {
+	if s.Config == nil || len(s.Config.Keywords) == 0 {
+		return nil
+	}
+	return s.Config.Keywords
 }
 
 // MCPToolNames returns the MCP tool names this skill declares as dependencies.
