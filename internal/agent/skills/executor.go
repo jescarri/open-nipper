@@ -83,8 +83,11 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, args string, timeo
 	if timeout <= 0 {
 		timeout = time.Duration(executorDefaultTimeout) * time.Second
 	}
+	// If the skill declares a longer timeout than the default, use it.
+	// The skill author knows how long their script needs (e.g. network scans).
 	if skill.Config != nil && skill.Config.Timeout > 0 {
-		if t := time.Duration(skill.Config.Timeout) * time.Second; t < timeout {
+		t := time.Duration(skill.Config.Timeout) * time.Second
+		if t > timeout {
 			timeout = t
 		}
 	}
