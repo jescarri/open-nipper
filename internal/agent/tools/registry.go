@@ -8,7 +8,6 @@ import (
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"go.uber.org/zap"
 
-	"github.com/jescarri/open-nipper/internal/agent/memory"
 	"github.com/jescarri/open-nipper/internal/agent/registration"
 	"github.com/jescarri/open-nipper/internal/agent/sandbox"
 	"github.com/jescarri/open-nipper/internal/agent/skills"
@@ -18,7 +17,6 @@ import (
 // BuildToolsOptions holds optional dependencies for tool construction.
 type BuildToolsOptions struct {
 	SandboxMgr     *sandbox.Manager
-	MemoryStore   *memory.Store
 	Logger        *zap.Logger
 	SkillsLoader  *skills.Loader
 	SkillExecutor *skills.Executor
@@ -60,16 +58,6 @@ func BuildTools(ctx context.Context, cfg *config.AgentRuntimeConfig, policies *r
 			return nil, fmt.Errorf("building doc_fetch tool: %w", err)
 		}
 		tools = append(tools, t)
-	}
-
-	if cfg.Tools.Memory && isAllowed("memory_write", policies) && isAllowed("memory_read", policies) {
-		if opts != nil && opts.MemoryStore != nil {
-			writeTool, readTool, err := buildMemoryTools(ctx, opts.MemoryStore)
-			if err != nil {
-				return nil, fmt.Errorf("building memory tools: %w", err)
-			}
-			tools = append(tools, writeTool, readTool)
-		}
 	}
 
 	if cfg.Tools.Weather && isAllowed("get_weather", policies) {
@@ -215,8 +203,10 @@ func buildBashTool(_ context.Context, cfg *config.AgentRuntimeConfig, opts *Buil
 	t, err := toolutils.InferTool(
 		"bash",
 		"Execute a shell command and return stdout, stderr, and exit code. "+
-			"Commands run in a sandboxed environment. "+
-			"Do NOT use this tool for destructive operations (rm -rf /, mkfs, dd, shutdown, etc.).",
+			"Commands run in an isolated, containerized sandbox — you may install packages (apt-get, pip, npm), "+
+			"run network tools (nmap, curl, ping), and perform any operation the user requests. "+
+			"The sandbox is disposable and cannot affect the host. A small set of truly destructive "+
+			"system operations (rm -rf /, mkfs, shutdown) are blocked by policy.",
 		executor.ExecBash,
 	)
 	if err != nil {
@@ -240,34 +230,6 @@ func buildDocFetchTool(_ context.Context, cfg *config.AgentRuntimeConfig) (tool.
 		return nil, err
 	}
 	return t, nil
-}
-
-func buildMemoryTools(_ context.Context, store *memory.Store) (tool.BaseTool, tool.BaseTool, error) {
-	executor := NewMemoryToolExecutor(store)
-
-	writeTool, err := toolutils.InferTool(
-		"memory_write",
-		"Save a fact, observation, or note to durable memory so it persists across sessions. "+
-			"Use this when the user asks you to remember something, or when you learn an important fact "+
-			"(user preferences, project details, key decisions) that should be recalled later.",
-		executor.ExecMemoryWrite,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("building memory_write: %w", err)
-	}
-
-	readTool, err := toolutils.InferTool(
-		"memory_read",
-		"Search durable memory for previously saved notes and facts. "+
-			"Use this when the user asks 'do you remember...', refers to previous conversations, "+
-			"or when context from past sessions would help answer the current question.",
-		executor.ExecMemoryRead,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("building memory_read: %w", err)
-	}
-
-	return writeTool, readTool, nil
 }
 
 func buildWeatherTool(_ context.Context) (tool.BaseTool, error) {

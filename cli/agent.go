@@ -22,7 +22,6 @@ import (
 	"github.com/jescarri/open-nipper/internal/agent/enrich"
 	"github.com/jescarri/open-nipper/internal/agent/llm"
 	agentmcp "github.com/jescarri/open-nipper/internal/agent/mcp"
-	agentmemory "github.com/jescarri/open-nipper/internal/agent/memory"
 	"github.com/jescarri/open-nipper/internal/agent/registration"
 	"github.com/jescarri/open-nipper/internal/agent/sandbox"
 	"github.com/jescarri/open-nipper/internal/agent/skills"
@@ -79,6 +78,11 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	if logLevel != "" {
 		if err := os.Setenv("NIPPER_LOG_LEVEL", logLevel); err != nil {
 			return fmt.Errorf("setting log level override: %w", err)
+		}
+	}
+	if logFormat != "" {
+		if err := os.Setenv("NIPPER_LOG_FORMAT", logFormat); err != nil {
+			return fmt.Errorf("setting log format override: %w", err)
 		}
 	}
 
@@ -272,18 +276,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	// 8. Create memory store (uses reg.UserID from initial registration).
-	var memStore *agentmemory.Store
-	if cfg.Tools.Memory {
-		memBasePath := cfg.BasePath
-		if memBasePath == "" {
-			memBasePath = defaultBasePath()
-		}
-		memStore = agentmemory.NewStore(memBasePath, reg.UserID, logger)
-		logger.Info("memory store ready", zap.String("userId", reg.UserID))
-	}
-
-	// 8b. Load skills (if enabled). Must run before building tools so bash can use skill executor.
+	// 8. Load skills (if enabled). Must run before building tools so bash can use skill executor.
 	var skillsLoader *skills.Loader
 	var skillExecutor *skills.Executor
 	if cfg.Skills.Enabled && cfg.Skills.Path != "" {
@@ -316,7 +309,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 	toolOpts := &tools.BuildToolsOptions{
 		SandboxMgr:     sandboxMgr,
-		MemoryStore:    memStore,
 		Logger:         logger,
 		SkillsLoader:   skillsLoader,
 		SkillExecutor:  skillExecutor,
@@ -386,9 +378,6 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	runtimeOpts := []niagent.RuntimeOption{
 		niagent.WithUsageTracker(usageTracker),
 		niagent.WithContextWindow(contextWindowMax),
-	}
-	if memStore != nil {
-		runtimeOpts = append(runtimeOpts, niagent.WithMemoryStore(memStore))
 	}
 	if mcpLoader != nil {
 		runtimeOpts = append(runtimeOpts, niagent.WithMCPLoader(mcpLoader))

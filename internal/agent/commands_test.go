@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	agentmemory "github.com/jescarri/open-nipper/internal/agent/memory"
 	"github.com/jescarri/open-nipper/internal/agent/registration"
 	"github.com/jescarri/open-nipper/internal/config"
 	"github.com/jescarri/open-nipper/internal/models"
@@ -19,7 +18,6 @@ func newTestRuntime(t *testing.T) *Runtime {
 	dir := t.TempDir()
 	logger := zap.NewNop()
 	store := session.NewStore(dir, logger)
-	memStore := agentmemory.NewStore(dir, "test-user", logger)
 	tracker := NewUsageTracker("gpt-4o", 128000)
 
 	cfg := &config.AgentRuntimeConfig{
@@ -28,9 +26,7 @@ func newTestRuntime(t *testing.T) *Runtime {
 			Provider: "openai",
 			Model:    "gpt-4o",
 		},
-		Tools: config.AgentToolsConfig{
-			Memory: true,
-		},
+		Tools: config.AgentToolsConfig{},
 		MaxSteps: 25,
 	}
 	reg := &registration.RegistrationResult{
@@ -39,7 +35,6 @@ func newTestRuntime(t *testing.T) *Runtime {
 	}
 
 	return NewRuntime(cfg, reg, nil, nil, store, logger,
-		WithMemoryStore(memStore),
 		WithUsageTracker(tracker),
 	)
 }

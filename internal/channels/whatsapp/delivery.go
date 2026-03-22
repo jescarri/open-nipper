@@ -80,7 +80,15 @@ func (w *WuzapiClient) DeliverResponse(ctx context.Context, resp *models.NipperR
 
 	var deliveryErr error
 	if resp.Text != "" {
-		deliveryErr = w.sendText(ctx, phone, resp.Text, meta)
+		// Split long messages into chunks to avoid Wuzapi/WhatsApp 500 errors.
+		// WhatsApp reliably delivers up to ~4000 chars per message.
+		chunks := splitTextChunks(resp.Text, 4000)
+		for _, chunk := range chunks {
+			if err := w.sendText(ctx, phone, chunk, meta); err != nil {
+				deliveryErr = err
+				break
+			}
+		}
 	}
 	for _, part := range resp.Parts {
 		switch part.Type {
@@ -378,4 +386,33 @@ func resolveTargetJID(meta models.WhatsAppMeta) string {
 
 func isImageMIME(mime string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(mime)), "image/")
+}
+
+// splitTextChunks breaks a long text into chunks of at most maxLen characters,
+// splitting on the last newline before the limit to avoid cutting mid-line.
+// If a single line exceeds maxLen, it is split at maxLen.
+func splitTextChunks(text string, maxLen int) []string {
+	if len(text) <= maxLen {
+		return []string{text}
+	}
+
+	var chunks []string
+	for len(text) > 0 {
+		if len(text) <= maxLen {
+			chunks = append(chunks, text)
+			break
+		}
+		// Find the last newline within the limit.
+		cut := strings.LastIndex(text[:maxLen], "\n")
+		if cut <= 0 {
+			cut = maxLen // no newline found — hard cut
+		}
+		chunks = append(chunks, text[:cut])
+		text = text[cut:]
+		// Strip leading newline from next chunk.
+		if len(text) > 0 && text[0] == '\n' {
+			text = text[1:]
+		}
+	}
+	return chunks
 }

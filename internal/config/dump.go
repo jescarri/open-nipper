@@ -144,17 +144,12 @@ func DumpAgentConfig() ([]byte, error) {
 				WebSearch:  true,
 				Bash:       true,
 				DocFetcher: false,
-				Memory:     true,
 				Weather:    false,
 				Cron:       true,
 				WebSearchConfig: WebSearchConfig{
 					Google:     WebSearchEngineGoogle{Enabled: false},
 					DuckDuckGo: WebSearchEngineDuckDuckGo{Enabled: true},
 				},
-			},
-			Memory: MemoryConfig{
-				MaxDays:   7,
-				MaxTokens: 4000,
 			},
 			Sandbox: SandboxConfig{
 				Enabled:        true,

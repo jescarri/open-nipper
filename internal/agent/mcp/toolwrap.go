@@ -3,13 +3,68 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"regexp"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 )
+
+// specialTokenRe matches chat-template special tokens leaked by local models
+// (e.g. <|end|>, <|start|>, <|channel|>, <|message|>, <|constrain|>).
+var specialTokenRe = regexp.MustCompile(`<\|[^|]*\|>`)
+
+// sanitizeToolCallJSON fixes common JSON corruption from open-source models:
+//  1. Strips trailing chat-template tokens appended after the JSON closing brace
+//     (e.g. }<|end|><|start|>assistant<|channel|>analysis<|message|>...).
+//  2. Fixes escaped quotes inside JSON keys/values that some models produce
+//     (e.g. "start_time\":\"2026-03-20T14:00:00\" → "start_time":"2026-03-20T14:00:00").
+//
+// Returns the cleaned JSON string for parsing.
+func sanitizeToolCallJSON(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return s
+	}
+
+	// 1. Truncate at first special token marker outside a JSON string context.
+	// Find the last '}' or ']' to identify where the JSON object/array ends,
+	// then discard everything after it.
+	lastBrace := strings.LastIndexAny(s, "}]")
+	if lastBrace >= 0 && lastBrace < len(s)-1 {
+		tail := s[lastBrace+1:]
+		if specialTokenRe.MatchString(tail) {
+			s = s[:lastBrace+1]
+		}
+	}
+
+	// 2. Fix escaped quotes pattern: \" inside the raw JSON that shouldn't be escaped.
+	// GPT-OSS models produce keys like: "start_time\": \"2026-03-20T14:00:00-07:00\"
+	// which after JSON parsing creates a single key containing the value.
+	// Try parsing first; only apply the fix if parsing fails.
+	var probe map[string]any
+	if json.Unmarshal([]byte(s), &probe) == nil {
+		return s // valid JSON, no fix needed
+	}
+
+	// Replace \" with " and re-validate. The pattern is typically:
+	//   "key\": \"value\"  →  "key": "value"
+	// We only replace backslash-quote sequences that appear outside already-valid strings.
+	fixed := strings.ReplaceAll(s, `\"`, `"`)
+	// After replacement we may have doubled quotes ("") at key boundaries; fix those too.
+	fixed = strings.ReplaceAll(fixed, `""`, `"`)
+
+	if json.Unmarshal([]byte(fixed), &probe) == nil {
+		return fixed
+	}
+
+	// If still invalid, return the original (normalizeArgs will handle the parse failure).
+	return s
+}
 
 // WrapTools applies two resilience layers around each MCP InvokableTool:
 //
@@ -19,14 +74,14 @@ import (
 //     validation, transport, etc.) it is converted into a successful tool
 //     result string so the ReAct loop can read the error and self-correct
 //     instead of crashing with a NodeRunError.
-func WrapTools(tools []tool.BaseTool, logger *zap.Logger) []tool.BaseTool {
+func WrapTools(tools []tool.BaseTool, logger *zap.Logger, reconnectFn func()) []tool.BaseTool {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	out := make([]tool.BaseTool, len(tools))
 	for i, t := range tools {
 		if inv, ok := t.(tool.InvokableTool); ok {
-			out[i] = &resilientMCPTool{inner: inv, logger: logger}
+			out[i] = &resilientMCPTool{inner: inv, logger: logger, reconnectFn: reconnectFn}
 		} else {
 			out[i] = t
 		}
@@ -35,8 +90,9 @@ func WrapTools(tools []tool.BaseTool, logger *zap.Logger) []tool.BaseTool {
 }
 
 type resilientMCPTool struct {
-	inner  tool.InvokableTool
-	logger *zap.Logger
+	inner       tool.InvokableTool
+	logger      *zap.Logger
+	reconnectFn func() // triggers reconnect for this tool's MCP server
 }
 
 func (r *resilientMCPTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
@@ -59,6 +115,28 @@ func (r *resilientMCPTool) InvokableRun(ctx context.Context, argumentsInJSON str
 
 	result, err := r.inner.InvokableRun(ctx, normalized, opts...)
 	if err != nil {
+		// Connection/transport errors: trigger reconnect and retry once.
+		if isConnectionError(err) && r.reconnectFn != nil {
+			r.logger.Warn("MCP connection error detected, triggering reconnect",
+				zap.String("tool", name),
+				zap.Error(err),
+			)
+			r.reconnectFn()
+
+			// Retry once with the (hopefully) fresh session.
+			result, err = r.inner.InvokableRun(ctx, normalized, opts...)
+			if err != nil {
+				r.logger.Error("MCP tool retry after reconnect failed",
+					zap.String("tool", name),
+					zap.Error(err),
+				)
+				return `{"error":"MCP connection lost and reconnection failed. Do NOT retry this tool — inform the user the service is temporarily unavailable."}`, nil
+			}
+			r.logger.Info("MCP tool retry after reconnect succeeded", zap.String("tool", name))
+			return r.capResult(name, result), nil
+		}
+
+		// Normal error softening (bad params, server-side validation, etc.).
 		r.logger.Warn("MCP tool invocation error softened",
 			zap.String("tool", name),
 			zap.Error(err),
@@ -68,35 +146,81 @@ func (r *resilientMCPTool) InvokableRun(ctx context.Context, argumentsInJSON str
 			err.Error(),
 		), nil
 	}
+	return r.capResult(name, result), nil
+}
+
+// capResult truncates oversized results.
+func (r *resilientMCPTool) capResult(name, result string) string {
 	if len(result) > maxToolResultBytes {
 		r.logger.Warn("truncating oversized MCP tool result",
 			zap.String("tool", name),
 			zap.Int("originalBytes", len(result)),
 			zap.Int("cappedBytes", maxToolResultBytes),
 		)
-		result = result[:maxToolResultBytes] + "\n...[truncated — result too large]"
+		return result[:maxToolResultBytes] + "\n...[truncated — result too large]"
 	}
-	return result, nil
+	return result
 }
 
-// normalizeArgs injects zero-value defaults for required schema fields that
-// are missing from the model's arguments. Currently handles array → [].
+// isConnectionError returns true if the error indicates a transport/connection
+// failure rather than a logical tool error. These warrant a reconnect attempt.
+func isConnectionError(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "client is closing") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "transport has been closed")
+}
+
+// normalizeArgs fixes common model mistakes in tool call arguments:
+//  1. Injects zero-values for required array fields the model omitted.
+//  2. Strips parameters not defined in the schema (models like Llama often
+//     hallucinate extra fields such as "detailed" or "max_results").
 func (r *resilientMCPTool) normalizeArgs(info *schema.ToolInfo, argsJSON string) string {
 	if info == nil || info.ParamsOneOf == nil {
 		return argsJSON
 	}
 
 	jsSchema, err := info.ParamsOneOf.ToJSONSchema()
-	if err != nil || jsSchema == nil || len(jsSchema.Required) == 0 {
+	if err != nil || jsSchema == nil {
 		return argsJSON
+	}
+
+	// Sanitize corrupted JSON from local models (escaped quotes, trailing special tokens).
+	sanitized := sanitizeToolCallJSON(argsJSON)
+	if sanitized != argsJSON {
+		r.logger.Debug("sanitized tool call JSON",
+			zap.Int("originalLen", len(argsJSON)),
+			zap.Int("sanitizedLen", len(sanitized)),
+		)
 	}
 
 	var args map[string]any
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return argsJSON
+	if err := json.Unmarshal([]byte(sanitized), &args); err != nil {
+		return argsJSON // return original on parse failure
 	}
 
 	changed := false
+
+	// Strip unknown parameters not defined in the schema.
+	if jsSchema.Properties != nil {
+		for key := range args {
+			if _, defined := jsSchema.Properties.Get(key); !defined {
+				delete(args, key)
+				changed = true
+				r.logger.Debug("stripped unknown parameter from tool call",
+					zap.String("field", key),
+				)
+			}
+		}
+	}
+
+	// Inject empty arrays for missing required array fields.
 	for _, reqField := range jsSchema.Required {
 		if _, exists := args[reqField]; exists {
 			continue

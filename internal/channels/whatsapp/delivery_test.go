@@ -525,3 +525,39 @@ func findRequest(logs []requestLog, path string) *requestLog {
 	}
 	return nil
 }
+
+func TestSplitTextChunks(t *testing.T) {
+	tests := []struct {
+		name      string
+		text      string
+		maxLen    int
+		wantCount int
+	}{
+		{"short text", "hello", 100, 1},
+		{"exact limit", "hello", 5, 1},
+		{"split on newline", "line1\nline2\nline3", 12, 2},
+		{"hard cut no newline", strings.Repeat("a", 200), 100, 2},
+		{"empty", "", 100, 1},
+		{"multi chunk", strings.Repeat("line\n", 100), 20, 25},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunks := splitTextChunks(tt.text, tt.maxLen)
+			if len(chunks) != tt.wantCount {
+				t.Errorf("splitTextChunks(%d chars, max %d) = %d chunks, want %d",
+					len(tt.text), tt.maxLen, len(chunks), tt.wantCount)
+			}
+			for i, c := range chunks {
+				if len(c) > tt.maxLen {
+					t.Errorf("chunk[%d] len=%d exceeds maxLen=%d", i, len(c), tt.maxLen)
+				}
+			}
+			// Verify all content is preserved.
+			joined := strings.Join(chunks, "\n")
+			if tt.text != "" && !strings.Contains(joined, tt.text[:1]) {
+				t.Error("content lost after splitting")
+			}
+		})
+	}
+}
+

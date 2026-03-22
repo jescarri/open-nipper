@@ -33,7 +33,7 @@ func validatorError(_ context.Context, _ string) (bool, error) {
 
 func newTestAdapter(t *testing.T, jobs []config.CronJob) *Adapter {
 	t.Helper()
-	return NewAdapter(AdapterDeps{
+	a, err := NewAdapter(AdapterDeps{
 		Config: config.CronChannelConfig{
 			Enabled: true,
 			Jobs:    jobs,
@@ -41,6 +41,10 @@ func newTestAdapter(t *testing.T, jobs []config.CronJob) *Adapter {
 		Logger:    zap.NewNop(),
 		Validator: validatorAlwaysOK,
 	})
+	if err != nil {
+		t.Fatalf("newTestAdapter: %v", err)
+	}
+	return a
 }
 
 // --------------- Adapter interface tests ---------------
@@ -91,11 +95,14 @@ func TestAdapter_HealthCheck_AllJobsFailed(t *testing.T) {
 	jobs := []config.CronJob{
 		{ID: "bad-schedule", Schedule: "not-a-cron", UserID: "alice", Prompt: "test"},
 	}
-	a := NewAdapter(AdapterDeps{
+	a, err := NewAdapter(AdapterDeps{
 		Config:    config.CronChannelConfig{Enabled: true, Jobs: jobs},
 		Logger:    zap.NewNop(),
 		Validator: validatorAlwaysOK,
 	})
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
 	_ = a.Start(context.Background())
 	defer func() { _ = a.Stop(context.Background()) }()
 
@@ -213,7 +220,7 @@ func TestAdapter_NormalizeInbound_InvalidJSON(t *testing.T) {
 // --------------- Scheduler tests ---------------
 
 func TestScheduler_LoadJobs_ValidJob(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "0 * * * * *", UserID: "alice", Prompt: "hi"},
 	}
@@ -227,7 +234,7 @@ func TestScheduler_LoadJobs_ValidJob(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_InvalidSchedule(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "bad", Schedule: "not-valid", UserID: "alice", Prompt: "hi"},
 	}
@@ -238,7 +245,7 @@ func TestScheduler_LoadJobs_InvalidSchedule(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_MissingID(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "", Schedule: "0 * * * * *", UserID: "alice", Prompt: "hi"},
 	}
@@ -249,7 +256,7 @@ func TestScheduler_LoadJobs_MissingID(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_MissingSchedule(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "", UserID: "alice", Prompt: "hi"},
 	}
@@ -260,7 +267,7 @@ func TestScheduler_LoadJobs_MissingSchedule(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_MissingUserID(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "0 * * * * *", UserID: "", Prompt: "hi"},
 	}
@@ -271,7 +278,7 @@ func TestScheduler_LoadJobs_MissingUserID(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_MissingPrompt(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "0 * * * * *", UserID: "alice", Prompt: ""},
 	}
@@ -282,7 +289,7 @@ func TestScheduler_LoadJobs_MissingPrompt(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_UserValidationFails(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "0 * * * * *", UserID: "ghost", Prompt: "hi"},
 	}
@@ -293,7 +300,7 @@ func TestScheduler_LoadJobs_UserValidationFails(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_UserValidationError(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "0 * * * * *", UserID: "alice", Prompt: "hi"},
 	}
@@ -304,7 +311,7 @@ func TestScheduler_LoadJobs_UserValidationError(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_NilValidator(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "0 * * * * *", UserID: "alice", Prompt: "hi"},
 	}
@@ -315,7 +322,7 @@ func TestScheduler_LoadJobs_NilValidator(t *testing.T) {
 }
 
 func TestScheduler_LoadJobs_MultipleJobs_PartialFailure(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "good", Schedule: "0 * * * * *", UserID: "alice", Prompt: "hi"},
 		{ID: "bad", Schedule: "invalid", UserID: "alice", Prompt: "hi"},
@@ -328,7 +335,7 @@ func TestScheduler_LoadJobs_MultipleJobs_PartialFailure(t *testing.T) {
 }
 
 func TestScheduler_Jobs_ReturnsCopy(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "0 * * * * *", UserID: "alice", Prompt: "hi"},
 	}
@@ -343,7 +350,7 @@ func TestScheduler_Jobs_ReturnsCopy(t *testing.T) {
 }
 
 func TestScheduler_FireJob_CallsHandler(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 
 	var received atomic.Int32
 	var mu sync.Mutex
@@ -399,13 +406,13 @@ func TestScheduler_FireJob_CallsHandler(t *testing.T) {
 }
 
 func TestScheduler_FireJob_NoHandler(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	// Should not panic when no handler is registered.
 	s.fireJob(config.CronJob{ID: "j", UserID: "u", Prompt: "p"})
 }
 
 func TestScheduler_FireJob_HandlerError(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	s.SetHandler(func(_ context.Context, _ *models.NipperMessage) error {
 		return fmt.Errorf("handler boom")
 	})
@@ -415,7 +422,7 @@ func TestScheduler_FireJob_HandlerError(t *testing.T) {
 }
 
 func TestScheduler_StartStop(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 	jobs := []config.CronJob{
 		{ID: "j1", Schedule: "0 * * * * *", UserID: "alice", Prompt: "hi"},
 	}
@@ -426,7 +433,7 @@ func TestScheduler_StartStop(t *testing.T) {
 }
 
 func TestScheduler_FireJob_MessageFields(t *testing.T) {
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 
 	var got *models.NipperMessage
 	s.SetHandler(func(_ context.Context, msg *models.NipperMessage) error {
@@ -470,7 +477,7 @@ func TestScheduler_ActualFiring(t *testing.T) {
 		t.Skip("skipping timing-sensitive test in short mode")
 	}
 
-	s := NewScheduler(zap.NewNop())
+	s := NewScheduler(zap.NewNop(), nil)
 
 	var received atomic.Int32
 	s.SetHandler(func(_ context.Context, _ *models.NipperMessage) error {

@@ -6,13 +6,14 @@ A multi-channel AI gateway that routes messages between messaging channels (What
 
 ## Why Open-Nipper
 
-- **Local AI First:** Designed to run within the constraints of Local AI.
+- **Local AI First:** Designed to run within the constraints of Local AI — small context windows, limited tool-calling ability, and token-sensitive models like GPT-OSS and Qwen3.
+- **Lean MCP Tools:** On-demand MCP tool loading that reduces tool schema tokens by ~70%. Instead of binding 40+ MCP tools on every request, the agent resolves only the tools needed for each message using keyword matching on skills and tool descriptions. See [Lean MCP Tools](#lean-mcp-tools) below.
 - **Decoupled by design:** Gateway and agents communicate over a queue (RabbitMQ), so you can scale, restart, or deploy them independently.
 - **Kubernetes-friendly:** Gateway and agent can run on Kubernetes; the agent needs no sandbox for basic operation.
 - **Lightweight:** Single binary for both gateway and agent; no heavy runtime.
-- **Skills and MCP:** Supports skills and local or remote MCP (SSE or STDIO); we favour SSE for remote tools.
+- **Skills and MCP:** Supports skills and local or remote MCP (SSE or STDIO); we favour SSE for remote tools. Skills are self-contained plugins with config-driven keyword activation, MCP tool declarations, and compact prompt hints.
 - **Proven WhatsApp stack:** Uses [Wuzapi](https://github.com/asternic/wuzapi) for WhatsApp; the gateway is decoupled from the messaging network.
-- **Sandboxed agent:** With sandbox enabled, the agent runs in containers; you can drop all capabilities if you want.
+- **Free-form sandbox:** The sandbox is a containerized Docker environment with full LAN and internet access. The agent can install packages, run network tools (nmap, curl), scan networks, and execute any command the user requests. A blocklist prevents only truly destructive operations.
 - **Container and sandbox:** The agent can run in a container; enabling the sandbox requires mounting the container runtime socket (Docker-out-of-Docker). Kubernetes pod sandbox is in the works.
 - **Containerized STDIO MCPs:** STDIO MCP servers can run inside the sandbox container, keeping untrusted tools isolated from the host.
 - **Support for Speech Recognition:** The agent can recognize speech and use it as a prompt, voice cloning and responses are next.
@@ -290,11 +291,105 @@ agent:
     - /var/run/docker.sock:/var/run/docker.sock
 ```
 
+### Skills volume mount caveat (DooD)
+
+Because sandbox containers are siblings of the agent container (not children), volume mounts are resolved by the **host Docker daemon**, not from inside the agent container. This means `skills.path` in the agent config must be a path that exists **on the host**.
+
+If the agent container mounts skills at an internal path (e.g. `/data/skills`), the sandbox manager will pass `-v /data/skills:/skills:ro` to Docker, but Docker resolves `/data/skills` on the **host** where that path does not exist.
+
+**Fix:** Mount skills using the same absolute path on both the host and inside the agent container:
+
+```yaml
+# docker-compose.yml
+agent:
+  volumes:
+    - /home/ubuntu/deploy/skills:/home/ubuntu/deploy/skills:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+```
+
+```yaml
+# agent.yaml
+skills:
+  enabled: true
+  path: "/home/ubuntu/deploy/skills"   # same path as host mount
+```
+
+This ensures the path the sandbox manager passes to `docker run -v` is resolvable by the host daemon. The same caveat applies to any `volume_mounts` in the sandbox config.
+
 ### Security considerations
 
 - Mounting the Docker socket grants the agent container the ability to manage containers on the host. This is equivalent to root access on the host.
 - Sandbox containers are hardened with `--cap-drop ALL`, read-only root FS, memory/CPU limits, and `no-new-privileges` (see `docs/SANDBOX_APT_CAPABILITIES.md`).
 - For production, consider using a socket proxy (e.g. [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)) to restrict the API surface exposed to the agent.
+
+---
+
+## Lean MCP Tools
+
+Local AI models (GPT-OSS, Qwen3, Llama) running on consumer hardware have limited context windows (8K–32K tokens) and struggle when dozens of MCP tool schemas are bound simultaneously. A typical setup with Home Assistant (20 tools), Joplin (13 tools), and Google Workspace (10 tools) burns **~12,000 tokens** on tool schemas alone — before any conversation history or system prompt.
+
+Lean MCP Tools solves this by loading MCP tools **on demand** instead of all at once.
+
+### How it works
+
+```
+User: "check my plants"
+        │
+        ▼
+  1. Skill keyword matching: "plant" → activates plant-care skill
+     plant-care declares mcp_tools: [GetLiveContext]
+        │
+        ▼
+  2. MCP tool keyword matching: "check" against tool descriptions
+     → no additional matches
+        │
+        ▼
+  3. Agent binds: 13 native tools + GetLiveContext = 14 tools
+     (instead of 13 native + 43 MCP = 56 tools)
+        │
+        ▼
+  4. LLM runs with ~3,500 tokens of tool schemas
+     (instead of ~12,000 tokens)
+```
+
+When no skills or MCP tools match the user's message (e.g. "tell me a joke"), only the 13 native tools are bound — zero MCP overhead.
+
+### Configuration
+
+```yaml
+# agent.yaml
+inference:
+  lean_mcp_tools: true   # false = legacy (all tools always bound)
+```
+
+### Skill-driven tool resolution
+
+Each skill declares its MCP dependencies and activation keywords in `config.yaml`:
+
+```yaml
+# skills/plant-care/config.yaml
+name: "plant-care"
+keywords: ["plant", "soil", "moisture", "water", "garden"]
+mcp_tools: ["GetLiveContext"]
+prompt_hint: |
+  Check soil moisture via Home Assistant MCP tools.
+  Steps: 1) GetLiveContext 2) get_weather 3) Sensor <= 30 = needs water.
+```
+
+When the user's message matches a keyword, the skill's `mcp_tools` are bound and the `prompt_hint` is injected into the system prompt. Adding a new skill never requires a code change — just create a directory with `config.yaml` and `SKILL.md`.
+
+### Token savings
+
+| Component | Legacy (all tools) | Lean mode |
+|-----------|-------------------|-----------|
+| Tool schemas (BindTools) | ~12,000 tokens | ~3,500 tokens |
+| System prompt (tool hints) | ~300 tokens | ~800 tokens (compact catalog) |
+| **Total tool overhead** | **~12,300 tokens** | **~4,300 tokens** |
+| **Savings** | — | **~65%** |
+
+### ToolMatcher interface
+
+The keyword matcher is pluggable via the `ToolMatcher` interface. The current implementation uses keyword overlap scoring. A future `EmbeddingToolMatcher` can use vector similarity for semantic matching without any runtime changes.
 
 ---
 

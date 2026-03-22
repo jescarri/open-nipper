@@ -53,9 +53,13 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a Scheduler. Jobs are not started until Start is called.
-func NewScheduler(logger *zap.Logger) *Scheduler {
+// loc sets the timezone for cron expressions; if nil, the system local timezone is used.
+func NewScheduler(logger *zap.Logger, loc *time.Location) *Scheduler {
+	if loc == nil {
+		loc = time.Local
+	}
 	return &Scheduler{
-		cron:     cron.New(cron.WithSeconds()),
+		cron:     cron.New(cron.WithSeconds(), cron.WithLocation(loc)),
 		logger:   logger,
 		entryIDs: make(map[string]cron.EntryID),
 		atTimers: make(map[string]*time.Timer),

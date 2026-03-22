@@ -91,8 +91,9 @@ type SlackConfig struct {
 
 // CronChannelConfig configures the cron scheduler adapter.
 type CronChannelConfig struct {
-	Enabled bool      `yaml:"enabled" mapstructure:"enabled"`
-	Jobs    []CronJob `yaml:"jobs"    mapstructure:"jobs"`
+	Enabled  bool      `yaml:"enabled"  mapstructure:"enabled"`
+	Timezone string    `yaml:"timezone" mapstructure:"timezone"` // IANA timezone name (e.g. "America/Vancouver"); defaults to UTC
+	Jobs     []CronJob `yaml:"jobs"     mapstructure:"jobs"`
 }
 
 // CronJob defines a single scheduled task.
@@ -306,7 +307,6 @@ type AgentRuntimeConfig struct {
 	Sandbox   SandboxConfig     `yaml:"sandbox"    mapstructure:"sandbox"`
 	Prompt    PromptConfig      `yaml:"prompt"     mapstructure:"prompt"`
 	Tools     AgentToolsConfig  `yaml:"tools"      mapstructure:"tools"`
-	Memory    MemoryConfig      `yaml:"memory"     mapstructure:"memory"`
 	S3        S3DefaultConfig   `yaml:"s3"         mapstructure:"s3"`
 	MCP                    []MCPServerConfig `yaml:"mcp"        mapstructure:"mcp"`
 	MediaEnrichment        MediaEnrichmentConfig `yaml:"media_enrichment" mapstructure:"media_enrichment"`
@@ -320,12 +320,6 @@ type AgentRuntimeConfig struct {
 type SkillsConfig struct {
 	Enabled bool   `yaml:"enabled" mapstructure:"enabled"`
 	Path    string `yaml:"path"    mapstructure:"path"` // override; default: {base_path}/skills
-}
-
-// MemoryConfig configures the durable memory subsystem.
-type MemoryConfig struct {
-	MaxDays   int `yaml:"max_days"   mapstructure:"max_days"`   // days of memory to inject into prompt (default 7)
-	MaxTokens int `yaml:"max_tokens" mapstructure:"max_tokens"` // max bytes of memory in system prompt (default 4000)
 }
 
 // InferenceConfig configures the LLM backend.
@@ -343,6 +337,10 @@ type InferenceConfig struct {
 	ContextWindowSize int `yaml:"context_window_size" mapstructure:"context_window_size"`
 	StreamGenerate    bool     `yaml:"stream_generate"        mapstructure:"stream_generate"`    // use streaming + aggregation for Generate calls (workaround for vLLM tool call bugs)
 	StopTokens        []string `yaml:"stop_tokens"            mapstructure:"stop_tokens"`        // optional stop sequences sent to the LLM; useful for local models that leak chat-template tokens (e.g. "<|end|>")
+	// LeanMCPTools enables on-demand MCP tool loading. When true, only native tools + search_tools
+	// are bound initially. The LLM calls search_tools(intent) to discover relevant MCP tools,
+	// then the runtime rebuilds the agent with only the matched tools. Reduces tool schema tokens by ~70%.
+	LeanMCPTools bool `yaml:"lean_mcp_tools" mapstructure:"lean_mcp_tools"`
 }
 
 // SandboxConfig configures the Docker sandbox for bash execution.
@@ -360,6 +358,10 @@ type SandboxConfig struct {
 	SkillsPath string `yaml:"skills_path" mapstructure:"skills_path"`
 	// ReadOnly runs the container root filesystem in read-only mode when true (default). Set false to allow writes outside tmpfs.
 	ReadOnly bool `yaml:"read_only" mapstructure:"read_only"`
+	// ExtraCapabilities lists additional Linux capabilities to grant the sandbox container
+	// beyond the default set (SETUID, SETGID, CHOWN, FOWNER, DAC_OVERRIDE).
+	// Example: ["NET_RAW"] to allow raw sockets for nmap/ping.
+	ExtraCapabilities []string `yaml:"extra_capabilities" mapstructure:"extra_capabilities"`
 }
 
 // PromptConfig holds system prompt and compaction settings.
@@ -377,7 +379,6 @@ type AgentToolsConfig struct {
 	WebSearch       bool            `yaml:"web_search"  mapstructure:"web_search"`
 	Bash            bool            `yaml:"bash"        mapstructure:"bash"`
 	DocFetcher      bool            `yaml:"doc_fetcher" mapstructure:"doc_fetcher"`
-	Memory          bool            `yaml:"memory"      mapstructure:"memory"`
 	Weather         bool            `yaml:"weather"     mapstructure:"weather"`
 	Cron            bool            `yaml:"cron"        mapstructure:"cron"`
 	WebSearchConfig WebSearchConfig `yaml:"web_search_config" mapstructure:"web_search_config"`

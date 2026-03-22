@@ -239,6 +239,11 @@ func TestIsGarbledOutput(t *testing.T) {
 			input: "The quick brown fox jumps over the lazy dog. This is a perfectly normal response with enough length to exercise the first-half check. It contains meaningful words, punctuation, and proper grammar throughout.",
 			want:  false,
 		},
+		{
+			name:  "gpt-oss garbled with reasoning leak and valid tail",
+			input: "**bold**...oops! Looks \u2026 \u2026 ... \u2026 ...\n\n\n\nOops! **...**\n\n\n\n?\n\n\n\nOops\u2026 \n\n\n\n...\n\n\n\n...\n\n\n\n?\n\n\n\n... \n\nSorry\u2026 \n\nWe **...** \n\nWe\u2026 \n\n\u2026\n\n\n--- \n\nThe \n\n\nWe \n\n\n\u2026\n\n\u200B\n\nIt seems the tool call succeeded but the response wasn't properly formatted. I need to inform the user that the office lights have been turned off. Use WhatsApp style, emojis, etc.*turning off the office lights* \U0001f4a1\U0001f526\n\nDone! The office is now as dark as a robot's soul after a night of cheap whiskey. \U0001f37b\U0001f5a4",
+			want:  true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -354,18 +359,18 @@ func TestStripChatTemplateTokens(t *testing.T) {
 
 func TestMatchSkillsByMessage(t *testing.T) {
 	allSkills := []skills.Skill{
-		{Name: "summarize_url"},
-		{Name: "yt_summary"},
-		{Name: "plant-care"},
-		{Name: "home-devices"},
-		{Name: "unknown-skill"}, // no keywords registered
+		{Name: "summarize_url", Config: &skills.SkillConfig{Keywords: []string{"http://", "https://", "url", "link", "summarize", "summarise", "save", "reading list", "bookmark"}}},
+		{Name: "yt_summary", Config: &skills.SkillConfig{Keywords: []string{"youtube", "youtu.be", "video", "yt", "transcript", "captions"}}},
+		{Name: "plant-care", Config: &skills.SkillConfig{Keywords: []string{"plant", "soil", "moisture", "water", "garden", "lawn", "watering"}}},
+		{Name: "home-devices", Config: &skills.SkillConfig{Keywords: []string{"light", "lights", "switch", "plug", "fan", "device", "turn on", "turn off", "toggle", "lamp"}}},
+		{Name: "unknown-skill"}, // no keywords — should be skipped
 	}
 
 	tests := []struct {
 		name    string
 		msg     *models.NipperMessage
 		want    []string
-		wantNil bool
+		wantNil bool // only true when msg is nil (matching not attempted)
 	}{
 		{
 			name:    "nil message",
@@ -373,9 +378,9 @@ func TestMatchSkillsByMessage(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:    "empty text",
-			msg:     &models.NipperMessage{Content: models.MessageContent{Text: ""}},
-			wantNil: true,
+			name: "empty text",
+			msg:  &models.NipperMessage{Content: models.MessageContent{Text: ""}},
+			want: []string{}, // non-nil empty: matching attempted, nothing matched
 		},
 		{
 			name: "matches plant-care by keyword",
@@ -403,9 +408,9 @@ func TestMatchSkillsByMessage(t *testing.T) {
 			want: []string{"summarize_url"},
 		},
 		{
-			name:    "no keyword match",
-			msg:     &models.NipperMessage{Content: models.MessageContent{Text: "what is the meaning of life?"}},
-			wantNil: true,
+			name: "no keyword match",
+			msg:  &models.NipperMessage{Content: models.MessageContent{Text: "what is the meaning of life?"}},
+			want: []string{}, // non-nil empty: matching attempted, nothing matched
 		},
 		{
 			name: "case insensitive",
@@ -528,6 +533,11 @@ func TestSalvageCleanSuffix(t *testing.T) {
 			input:   "… … … ...\n\n…  ...\n\n—",
 			wantNil: true,
 		},
+		{
+			name:  "gpt-oss garbled with reasoning leak salvages clean tail",
+			input: "**bold**...oops! Looks \u2026 \u2026 ... \u2026 ...\n\n\n\nOops! **...**\n\n\n\n?\n\n\n\nOops\u2026 \n\n\n\n...\n\n\n\n...\n\n\n\n?\n\n\n\n... \n\nSorry\u2026 \n\nWe **...** \n\nWe\u2026 \n\n\u2026\n\n\n--- \n\nThe \n\n\nWe \n\n\n\u2026\n\n\u200B\n\nIt seems the tool call succeeded but the response wasn't properly formatted. I need to inform the user that the office lights have been turned off. Use WhatsApp style, emojis, etc.*turning off the office lights* \U0001f4a1\U0001f526\n\nDone! The office is now as dark as a robot's soul after a night of cheap whiskey. \U0001f37b\U0001f5a4",
+			want: "Done! The office is now as dark as a robot's soul after a night of cheap whiskey. \U0001f37b\U0001f5a4",
+		},
 	}
 
 	for _, tt := range tests {
@@ -560,6 +570,12 @@ func TestIsReasoningNarration(t *testing.T) {
 		{"Here is the weather forecast.", false},
 		{"I turned off the lights for you.", false}, // starts with "I " not "I need"
 		{"The tool responded success.", true},
+		{"It seems the tool call succeeded but the response wasn't properly formatted.", true},
+		{"It looks like the action completed successfully.", true},
+		{"It appears that we need to send a confirmation.", true},
+		{"The tool call returned a success response.", true},
+		{"Use WhatsApp style, emojis, etc.", true},
+		{"The user is asking to turn off the lights.", true},
 	}
 
 	for _, tt := range tests {

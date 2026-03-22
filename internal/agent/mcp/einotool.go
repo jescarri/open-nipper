@@ -44,6 +44,7 @@ func GetToolsFromSession(ctx context.Context, session *mcpsdk.ClientSession, sof
 			return nil, fmt.Errorf("parsing input schema for tool %q: %w", t.Name, err)
 		}
 		fixPatterns(parsedSchema)
+		parsedSchema = fixBooleanSchemaNodes(parsedSchema)
 
 		tools = append(tools, &mcpTool{
 			session:   session,
@@ -137,6 +138,74 @@ func normalizeBooleanSchemasRecurse(v any) any {
 	default:
 		return v
 	}
+}
+
+// fixBooleanSchemaNodes walks the typed jsonschema.Schema tree and replaces any
+// sub-schema whose MarshalJSON output is bare "true" or "false" with a concrete
+// object schema. The eino-contrib/jsonschema package stores JSON Schema boolean
+// schemas (section 4.3.2) in a private boolean field; its MarshalJSON then emits
+// the raw boolean literal, which llama.cpp and other strict parsers reject with
+// "Unrecognized schema: true". This pass catches cases the raw-JSON normalization
+// (normalizeBooleanSchemas) cannot prevent — e.g. when UnmarshalJSON internally
+// creates boolean schema nodes.
+func fixBooleanSchemaNodes(s *jsonschema.Schema) *jsonschema.Schema {
+	if s == nil {
+		return nil
+	}
+	// Quick check: a boolean schema has no exported fields populated.
+	if s.Type == "" && s.Properties == nil && s.Items == nil &&
+		s.AdditionalProperties == nil && len(s.AllOf) == 0 &&
+		len(s.AnyOf) == 0 && len(s.OneOf) == 0 &&
+		s.Description == "" && len(s.Enum) == 0 && s.Ref == "" &&
+		s.Not == nil && s.If == nil {
+		b, err := json.Marshal(s)
+		if err == nil {
+			switch string(b) {
+			case "true":
+				return &jsonschema.Schema{Type: "object"}
+			case "false":
+				r := &jsonschema.Schema{Type: "object"}
+				r.Description = "unsupported"
+				return r
+			}
+		}
+	}
+
+	// Recurse into all sub-schema positions.
+	s.AdditionalProperties = fixBooleanSchemaNodes(s.AdditionalProperties)
+	s.Items = fixBooleanSchemaNodes(s.Items)
+	s.Not = fixBooleanSchemaNodes(s.Not)
+	s.If = fixBooleanSchemaNodes(s.If)
+	s.Then = fixBooleanSchemaNodes(s.Then)
+	s.Else = fixBooleanSchemaNodes(s.Else)
+
+	if s.Properties != nil {
+		for pair := s.Properties.Oldest(); pair != nil; pair = pair.Next() {
+			s.Properties.Set(pair.Key, fixBooleanSchemaNodes(pair.Value))
+		}
+	}
+	for i := range s.AllOf {
+		s.AllOf[i] = fixBooleanSchemaNodes(s.AllOf[i])
+	}
+	for i := range s.AnyOf {
+		s.AnyOf[i] = fixBooleanSchemaNodes(s.AnyOf[i])
+	}
+	for i := range s.OneOf {
+		s.OneOf[i] = fixBooleanSchemaNodes(s.OneOf[i])
+	}
+	for i := range s.PrefixItems {
+		s.PrefixItems[i] = fixBooleanSchemaNodes(s.PrefixItems[i])
+	}
+	for k, v := range s.PatternProperties {
+		s.PatternProperties[k] = fixBooleanSchemaNodes(v)
+	}
+	for k, v := range s.DependentSchemas {
+		s.DependentSchemas[k] = fixBooleanSchemaNodes(v)
+	}
+	for k, v := range s.Definitions {
+		s.Definitions[k] = fixBooleanSchemaNodes(v)
+	}
+	return s
 }
 
 // fixPatterns recursively walks a JSON schema and ensures every "pattern"

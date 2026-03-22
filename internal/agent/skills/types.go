@@ -19,6 +19,9 @@ type SkillConfig struct {
 	Name        string           `yaml:"name"`
 	Version     string           `yaml:"version"`
 	Description string           `yaml:"description"`
+	PromptHint  string           `yaml:"prompt_hint"` // compact LLM-facing summary; used instead of full SKILL.md when present
+	MCPTools    []string         `yaml:"mcp_tools"`   // MCP tool names this skill requires (e.g. ["GetLiveContext", "HassTurnOn"])
+	Keywords    []string         `yaml:"keywords"`    // keyword triggers that activate this skill's full prompt (e.g. ["scan", "nmap", "network"])
 	Type        string           `yaml:"type"`        // "script" (default) | "mcp" — mcp = no script, use MCP tools only
 	Runtime     string           `yaml:"runtime"`     // "bash" | "node" | "python"
 	Entrypoint  string           `yaml:"entrypoint"`  // e.g. "scripts/run.sh"
@@ -41,6 +44,34 @@ type SkillSecretRef struct {
 // SkillDeps lists required system dependencies.
 type SkillDeps struct {
 	System []string `yaml:"system"` // required binaries
+}
+
+// promptDesc returns the text to inject for this skill in the system prompt.
+// If config.yaml provides a compact prompt_hint, that is used instead of the
+// full SKILL.md body, significantly reducing prompt size for large skills.
+func (s *Skill) promptDesc() string {
+	if s.Config != nil && s.Config.PromptHint != "" {
+		return s.Config.PromptHint
+	}
+	return s.Description
+}
+
+// ActivationKeywords returns the keywords that trigger this skill's full prompt injection.
+// Returns nil if no keywords are configured.
+func (s *Skill) ActivationKeywords() []string {
+	if s.Config == nil || len(s.Config.Keywords) == 0 {
+		return nil
+	}
+	return s.Config.Keywords
+}
+
+// MCPToolNames returns the MCP tool names this skill declares as dependencies.
+// Used by lean MCP mode to bind the right tools when a skill is activated.
+func (s *Skill) MCPToolNames() []string {
+	if s.Config == nil || len(s.Config.MCPTools) == 0 {
+		return nil
+	}
+	return s.Config.MCPTools
 }
 
 // IsMCPOnly returns true if this skill has no runnable script and should be used via MCP tools only.

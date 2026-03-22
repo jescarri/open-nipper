@@ -41,15 +41,28 @@ func EinoMessageToTranscriptLine(msg *schema.Message, runID string) session.Tran
 	}
 }
 
+// stripControlChars removes ASCII control characters (0x00–0x1F) from s,
+// preserving newline (\n) and tab (\t). Stray control bytes (e.g. ETX 0x03
+// from WhatsApp) can confuse open-source LLM tokenizers and trigger special
+// token leakage.
+func stripControlChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\n' && r != '\t' {
+			return -1 // drop
+		}
+		return r
+	}, s)
+}
+
 // NipperMessageToEinoMessage converts an inbound NipperMessage to an Eino user message.
 // Text content takes precedence; media attachment context is appended so the LLM
 // can see S3/HTTP URLs from WhatsApp media and invoke doc_fetch to retrieve them.
 func NipperMessageToEinoMessage(msg *models.NipperMessage) *schema.Message {
-	text := msg.Content.Text
+	text := stripControlChars(msg.Content.Text)
 	if text == "" {
 		for _, p := range msg.Content.Parts {
 			if p.Type == "text" && p.Text != "" {
-				text = p.Text
+				text = stripControlChars(p.Text)
 				break
 			}
 		}

@@ -185,8 +185,14 @@ func TestResolveFieldAlias(t *testing.T) {
 		{"lon", 7, true},
 		{"lng", 7, true},
 		{"8", 7, true},
+		{"email", 8, true},
+		{"mail", 8, true},
+		{"9", 8, true},
+		{"calendar", 9, true},
+		{"cal", 9, true},
+		{"10", 9, true},
 		{"unknown", -1, false},
-		{"9", -1, false},
+		{"11", -1, false},
 	}
 	for _, tc := range tests {
 		idx, ok := ResolveFieldAlias(tc.alias)
@@ -240,6 +246,16 @@ func TestSetField(t *testing.T) {
 	p.SetField(7, "139.6503")
 	if p.Longitude != "139.6503" {
 		t.Errorf("SetField(7): got %q", p.Longitude)
+	}
+
+	p.SetField(8, "alice@example.com")
+	if p.Email != "alice@example.com" {
+		t.Errorf("SetField(8): got %q", p.Email)
+	}
+
+	p.SetField(9, "work")
+	if p.Calendar != "work" {
+		t.Errorf("SetField(9): got %q", p.Calendar)
 	}
 
 	// Out of bounds should not panic.
@@ -356,6 +372,62 @@ func TestLoadProfile_CorruptFile(t *testing.T) {
 	_, err := LoadProfile(dir, userID)
 	if err == nil {
 		t.Error("expected error for corrupt profile")
+	}
+}
+
+func TestProfileFormatForPrompt_WithEmail(t *testing.T) {
+	p := &UserProfile{
+		UserName: "Alice",
+		Email:    "alice@example.com",
+	}
+	prompt := p.FormatForPrompt()
+	if !strings.Contains(prompt, "alice@example.com") {
+		t.Error("prompt should contain email")
+	}
+	if !strings.Contains(prompt, "Email") {
+		t.Error("prompt should contain Email label")
+	}
+}
+
+func TestProfileFormatForPrompt_CalendarDefault(t *testing.T) {
+	p := &UserProfile{UserName: "Alice"}
+	prompt := p.FormatForPrompt()
+	if !strings.Contains(prompt, "Calendar: primary") {
+		t.Error("prompt should default calendar to primary")
+	}
+}
+
+func TestProfileFormatForPrompt_CalendarCustom(t *testing.T) {
+	p := &UserProfile{
+		UserName: "Alice",
+		Calendar: "work",
+	}
+	prompt := p.FormatForPrompt()
+	if !strings.Contains(prompt, "Calendar: work") {
+		t.Error("prompt should contain custom calendar")
+	}
+}
+
+func TestProfileIsEmpty_WithEmail(t *testing.T) {
+	p := &UserProfile{Email: "test@example.com"}
+	if p.IsEmpty() {
+		t.Error("profile with email should not be empty")
+	}
+}
+
+func TestProfileIsEmpty_WithCalendar(t *testing.T) {
+	p := &UserProfile{Calendar: "work"}
+	if p.IsEmpty() {
+		t.Error("profile with calendar should not be empty")
+	}
+}
+
+func TestCalendarFieldDefaultsToEmpty(t *testing.T) {
+	p := &UserProfile{}
+	p.SetField(9, "")
+	// Setting empty string should default to "primary"
+	if p.Calendar != "primary" {
+		t.Errorf("Calendar should default to primary, got %q", p.Calendar)
 	}
 }
 

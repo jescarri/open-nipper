@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
@@ -74,13 +75,13 @@ func (c *RabbitMQConsumer) Start(ctx context.Context) error {
 			}
 		}
 
-		// If stopped or context cancelled, exit.
+		// If stopped or context cancelled, exit; otherwise back off before retrying.
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-c.stopCh:
 			return nil
-		default:
+		case <-time.After(2 * time.Second):
 		}
 	}
 }
