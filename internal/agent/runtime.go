@@ -1414,6 +1414,7 @@ var skillKeywords = map[string][]string{
 	"yt_summary":    {"youtube", "youtu.be", "video", "yt", "transcript", "captions"},
 	"plant-care":    {"plant", "soil", "moisture", "water", "garden", "lawn", "watering"},
 	"home-devices":  {"light", "lights", "switch", "plug", "fan", "device", "turn on", "turn off", "toggle", "lamp"},
+	"network-scan":  {"scan", "nmap", "network", "lan", "subnet", "192.168", "10.0.", "devices on"},
 }
 
 // matchSkillsByMessage returns skill names whose keywords match the user message.
