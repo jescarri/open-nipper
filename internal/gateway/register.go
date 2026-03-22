@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 
 	"github.com/jescarri/open-nipper/internal/config"
@@ -20,10 +21,16 @@ import (
 	"github.com/jescarri/open-nipper/internal/ratelimit"
 )
 
+// AMQPChannelProvider can open a fresh AMQP channel (e.g. *queue.Broker).
+type AMQPChannelProvider interface {
+	PublishChannel() (*amqp.Channel, error)
+}
+
 // RegisterHandler implements POST /agents/register — the agent auto-registration endpoint.
 type RegisterHandler struct {
 	repo    datastore.Repository
 	mgmt    queue.ManagementClient
+	broker  AMQPChannelProvider
 	limiter *ratelimit.Limiter
 	cfg     *config.Config
 	logger  *zap.Logger
@@ -33,6 +40,7 @@ type RegisterHandler struct {
 type RegisterHandlerDeps struct {
 	Repo    datastore.Repository
 	Mgmt    queue.ManagementClient
+	Broker  AMQPChannelProvider
 	Limiter *ratelimit.Limiter
 	Config  *config.Config
 	Logger  *zap.Logger
@@ -43,6 +51,7 @@ func NewRegisterHandler(deps RegisterHandlerDeps) *RegisterHandler {
 	return &RegisterHandler{
 		repo:    deps.Repo,
 		mgmt:    deps.Mgmt,
+		broker:  deps.Broker,
 		limiter: deps.Limiter,
 		cfg:     deps.Config,
 		logger:  deps.Logger,
@@ -264,6 +273,21 @@ func (h *RegisterHandler) Handle(w http.ResponseWriter, r *http.Request) {
 				zap.String("agentId", agent.ID),
 				zap.String("rmqUsername", rmqUsername),
 			)
+		}
+	}
+
+	// 10c. Ensure per-user queues exist (they are created at gateway startup,
+	// but a user bootstrapped while the gateway is running won't have them yet).
+	if h.broker != nil {
+		if topoCh, err := h.broker.PublishChannel(); err != nil {
+			h.logger.Warn("agent registration: unable to open AMQP channel for queue declaration",
+				zap.String("agentId", agent.ID), zap.Error(err))
+		} else {
+			if err := queue.DeclareUserQueues(topoCh, agent.UserID); err != nil {
+				h.logger.Warn("agent registration: failed to declare user queues",
+					zap.String("userId", agent.UserID), zap.Error(err))
+			}
+			topoCh.Close()
 		}
 	}
 

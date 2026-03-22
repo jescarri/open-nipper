@@ -412,6 +412,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		registerHandler = gateway.NewRegisterHandler(gateway.RegisterHandlerDeps{
 			Repo:    repo,
 			Mgmt:    mgmtClient,
+			Broker:  broker,
 			Limiter: limiter,
 			Config:  cfg,
 			Logger:  log.Named("register"),
