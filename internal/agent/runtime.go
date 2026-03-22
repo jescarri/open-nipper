@@ -856,12 +856,12 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 				zap.Strings("matched", matched),
 			)
 		} else {
-			// Fallback: no matches from keywords or skills — bind ALL MCP tools.
-			// This is the safe path: same as lean_mcp_tools=false.
-			agentTools = r.currentTools()
-			r.logger.Warn("lean MCP mode: no tools matched, falling back to all MCP tools",
+			// No MCP tools matched — use only native tools (no MCP bloat).
+			// The user isn't asking for anything that needs MCP tools.
+			agentTools = r.tools
+			r.logger.Debug("lean MCP mode: no MCP tools needed, using native only",
 				zap.String("sessionKey", msg.SessionKey),
-				zap.Int("totalTools", len(agentTools)),
+				zap.Int("nativeCount", len(r.tools)),
 			)
 		}
 	} else {
