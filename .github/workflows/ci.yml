@@ -126,4 +126,4 @@ jobs:
       - name: Run container smoke test
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          docker run --rm ${{ steps.image.outputs.name }}:latest --help
+          docker run --rm ${{ steps.image.outputs.name }}:latest nipper --help
