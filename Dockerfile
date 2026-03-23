@@ -23,7 +23,7 @@ WORKDIR /app
 
 # Install Docker CLI (for sandbox and STDIO MCP container support).
 # Only the CLI is needed — the daemon runs on the host via the mounted socket.
-RUN apk add --no-cache docker-cli
+RUN apk add --no-cache docker-cli tzdata
 
 # Copy the binary from builder
 COPY --from=builder /tmp/nipper /usr/local/bin/nipper
