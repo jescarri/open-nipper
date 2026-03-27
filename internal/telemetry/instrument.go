@@ -139,6 +139,38 @@ func RecordSkillSecretsResolved(ctx context.Context, m *Metrics, provider string
 	))
 }
 
+// RecordEmbeddingRequest increments the embedding requests counter.
+func RecordEmbeddingRequest(ctx context.Context, m *Metrics, model, status string) {
+	if m == nil || m.EmbeddingRequestsTotal == nil {
+		return
+	}
+	m.EmbeddingRequestsTotal.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("model", model),
+		attribute.String("status", status),
+	))
+}
+
+// RecordEmbeddingDuration records the embedding API call duration in seconds.
+func RecordEmbeddingDuration(ctx context.Context, m *Metrics, model, operation string, durationSec float64) {
+	if m == nil || m.EmbeddingDurationSeconds == nil {
+		return
+	}
+	m.EmbeddingDurationSeconds.Record(ctx, durationSec, metric.WithAttributes(
+		attribute.String("model", model),
+		attribute.String("operation", operation),
+	))
+}
+
+// RecordToolMatchDuration records the tool matcher duration in seconds.
+func RecordToolMatchDuration(ctx context.Context, m *Metrics, matcherType string, durationSec float64) {
+	if m == nil || m.ToolMatchDurationSeconds == nil {
+		return
+	}
+	m.ToolMatchDurationSeconds.Record(ctx, durationSec, metric.WithAttributes(
+		attribute.String("matcher_type", matcherType),
+	))
+}
+
 // SpanError marks a span as errored with the given error.
 func SpanError(span trace.Span, err error) {
 	if span == nil || err == nil {

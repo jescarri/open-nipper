@@ -240,6 +240,7 @@ type Runtime struct {
 	mcpLoader        *agentmcp.Loader   // live reference; tools are resolved dynamically on each message
 	skillsLoader     *skills.Loader    // optional; skills injected into system prompt when non-nil
 	enrichPipeline   *enrich.Pipeline  // optional; media enrichment (speech-to-text, etc.)
+	toolMatcher      tools.ToolMatcher // optional; used in lean mode to match MCP tools (default: KeywordToolMatcher)
 
 	// contextWindowMax is the model's context window in tokens (0 = unknown). Used for auto-compaction.
 	contextWindowMax int
@@ -307,6 +308,20 @@ func WithSkillsLoader(loader *skills.Loader) RuntimeOption {
 // WithEnrichPipeline attaches a media enrichment pipeline (speech-to-text, etc.).
 func WithEnrichPipeline(pipeline *enrich.Pipeline) RuntimeOption {
 	return func(r *Runtime) { r.enrichPipeline = pipeline }
+}
+
+// WithToolMatcher sets a custom ToolMatcher for lean MCP mode.
+// When nil, KeywordToolMatcher is used (the default).
+func WithToolMatcher(matcher tools.ToolMatcher) RuntimeOption {
+	return func(r *Runtime) { r.toolMatcher = matcher }
+}
+
+// effectiveToolMatcher returns the configured ToolMatcher, falling back to KeywordToolMatcher.
+func (r *Runtime) effectiveToolMatcher() tools.ToolMatcher {
+	if r.toolMatcher != nil {
+		return r.toolMatcher
+	}
+	return &tools.KeywordToolMatcher{}
 }
 
 // currentTools merges the base (non-MCP) tools with the current MCP tools.
@@ -815,13 +830,13 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 		//   2. Activated skills' mcp_tools declarations (e.g. plant-care → GetLiveContext)
 		//   3. Fallback: bind ALL MCP tools if nothing else matched (graceful degradation)
 		mcpCatalog = r.buildMCPToolCatalog()
-		matcher := &tools.KeywordToolMatcher{}
+		matcher := r.effectiveToolMatcher()
 		userText := ""
 		if msg != nil {
 			userText = msg.Content.Text
 		}
 
-		// Source 1: keyword match against MCP tool catalog.
+		// Source 1: match against MCP tool catalog (keyword, embedding, or hybrid).
 		matched, _ := matcher.Match(ctx, userText, mcpCatalog, 10)
 
 		// Source 2: activated skills declare mcp_tools they need.

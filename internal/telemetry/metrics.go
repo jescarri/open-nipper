@@ -48,6 +48,11 @@ type Metrics struct {
 	SkillExecutionDurationSeconds metric.Float64Histogram
 	SkillSecretsResolvedTotal     metric.Int64Counter
 
+	// Embedding metrics.
+	EmbeddingRequestsTotal      metric.Int64Counter
+	EmbeddingDurationSeconds    metric.Float64Histogram
+	ToolMatchDurationSeconds    metric.Float64Histogram
+
 	// Gauge values — callers write to these; the registered callback reads them.
 	QueueDepth         GaugeValue
 	AgentConsumerCount GaugeValue
@@ -163,6 +168,10 @@ func buildMetrics(mp metric.MeterProvider) *Metrics {
 	m.SkillExecutionsTotal = mustCounter("nipper_agent_skill_executions_total", "Total skill executions")
 	m.SkillExecutionDurationSeconds = mustHistogram("nipper_agent_skill_execution_duration_seconds", "Skill execution duration in seconds")
 	m.SkillSecretsResolvedTotal = mustCounter("nipper_agent_skill_secrets_resolved_total", "Total skill secrets resolved")
+
+	m.EmbeddingRequestsTotal = mustCounter("nipper_agent_embedding_requests_total", "Total embedding API requests")
+	m.EmbeddingDurationSeconds = mustHistogram("nipper_agent_embedding_duration_seconds", "Embedding API call duration in seconds")
+	m.ToolMatchDurationSeconds = mustHistogram("nipper_agent_tool_match_duration_seconds", "Tool matcher duration in seconds")
 
 	// Register observable gauges backed by atomic GaugeValues.
 	_, _ = meter.Int64ObservableGauge("nipper_queue_depth",
