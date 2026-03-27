@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New telemetry metrics: `nipper_agent_embedding_requests_total`, `nipper_agent_embedding_duration_seconds`, `nipper_agent_tool_match_duration_seconds`.
   - `WithToolMatcher` runtime option for pluggable matcher injection.
 
+- **Embedding accuracy test tool** (`cmd/embedding-test`)
+  - CLI tool for validating embedding accuracy against a YAML-defined tool catalog and test suite.
+  - Two modes: batch test suite (CI-friendly, exits 1 on failure) and single query (interactive exploration).
+  - Loads catalog and test cases from YAML files — no recompilation needed to add tools or tests.
+  - Reports cosine similarity scores, expected/missed/false-positive status per test case.
+  - See `docs/EMBEDDING_TEST.md` for usage and examples.
+
 ## [2.0.1] - 2026-03-22
 
 ### Fixed

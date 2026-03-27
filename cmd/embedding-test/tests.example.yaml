@@ -1,0 +1,100 @@
+# Test cases for embedding accuracy validation.
+#
+# Each test sends an intent through the embedding model and checks whether the
+# expected tools rank above the similarity threshold.
+#
+# Fields:
+#   intent:        user message to embed
+#   description:   human label for the test (shown in output)
+#   expect_tools:  tool names that MUST be above threshold (MISS = fail)
+#   reject_tools:  tool names that must NOT be above threshold (FALSE POSITIVE = fail)
+#
+# For negative cases (no tools should match), leave expect_tools empty.
+
+tests:
+  # --- Home automation (multilingual) ---
+  - intent: "enciende la luz"
+    description: "Spanish: turn on the light"
+    expect_tools: [HassTurnOn, HassLightSet]
+    reject_tools: [search_notes, manage_event]
+
+  - intent: "apaga la luz del cuarto"
+    description: "Spanish: turn off bedroom light"
+    expect_tools: [HassTurnOff, HassLightSet]
+
+  - intent: "it's too dark in here"
+    description: "Semantic: implicit light request"
+    expect_tools: [HassTurnOn, HassLightSet]
+
+  - intent: "turn on the fan"
+    description: "English: turn on fan"
+    expect_tools: [HassTurnOn]
+
+  - intent: "prende el ventilador"
+    description: "Spanish: turn on the fan"
+    expect_tools: [HassTurnOn]
+
+  # --- Email ---
+  - intent: "check my email"
+    description: "English: check email"
+    expect_tools: [search_gmail_messages]
+
+  - intent: "revisa mi correo"
+    description: "Spanish: check my email"
+    expect_tools: [search_gmail_messages]
+
+  - intent: "unsubscribe from spam"
+    description: "English: unsubscribe"
+    expect_tools: [get_gmail_unsubscribe_links]
+
+  - intent: "desuscribirme de correos basura"
+    description: "Spanish: unsubscribe from junk mail"
+    expect_tools: [get_gmail_unsubscribe_links]
+
+  # --- Notes ---
+  - intent: "search my notes for recipes"
+    description: "English: search notes"
+    expect_tools: [search_notes, list_notes]
+
+  - intent: "busca en mis notas"
+    description: "Spanish: search my notes"
+    expect_tools: [search_notes, list_notes]
+
+  # --- Calendar ---
+  - intent: "appointment tomorrow at 3pm"
+    description: "English: calendar appointment"
+    expect_tools: [manage_event, get_events]
+
+  - intent: "que tengo mañana en la agenda"
+    description: "Spanish: what's on my calendar tomorrow"
+    expect_tools: [manage_event, get_events]
+
+  - intent: "schedule a meeting for Monday"
+    description: "English: schedule meeting"
+    expect_tools: [manage_event]
+
+  # --- Plant care ---
+  - intent: "do my plants need water?"
+    description: "English: plant watering check"
+    expect_tools: [GetLiveContext]
+
+  - intent: "revisa la humedad del jardín"
+    description: "Spanish: check garden moisture"
+    expect_tools: [GetLiveContext]
+
+  - intent: "how's the soil moisture?"
+    description: "English: soil moisture check"
+    expect_tools: [GetLiveContext]
+
+  # --- Negative cases (no MCP tools expected) ---
+  - intent: "tell me a joke"
+    description: "Negative: no tools should match"
+    expect_tools: []
+
+  - intent: "what time is it"
+    description: "Negative: no MCP tools needed"
+    expect_tools: []
+
+  - intent: "thanks, that's all"
+    description: "Negative: conversation end"
+    expect_tools: []

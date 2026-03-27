@@ -438,6 +438,31 @@ ollama serve  # exposes /v1/embeddings on :11434
 
 ---
 
+### Testing embedding accuracy
+
+The `embedding-test` CLI tool validates embedding accuracy against your tool catalog before deploying:
+
+```bash
+# Batch test suite (CI-friendly — exits 1 on failure)
+go run ./cmd/embedding-test \
+  --base-url http://localhost:11434/v1 \
+  --model embeddinggemma:300m \
+  --catalog cmd/embedding-test/catalog.example.yaml \
+  --tests cmd/embedding-test/tests.example.yaml \
+  --threshold 0.3
+
+# Single query exploration
+go run ./cmd/embedding-test \
+  --base-url http://localhost:11434/v1 \
+  --model embeddinggemma:300m \
+  --catalog cmd/embedding-test/catalog.example.yaml \
+  --query "enciende la luz"
+```
+
+See [docs/EMBEDDING_TEST.md](docs/EMBEDDING_TEST.md) for full usage, file formats, and model comparison tips.
+
+---
+
 ## Testing channels locally
 
 ### Docker setup
