@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-03-27
+
+### Added
+
+- **Embedding-based tool matching** (`agent.embeddings` config section)
+  - `EmbeddingToolMatcher` uses cosine similarity against tool description embeddings for semantic and multilingual matching.
+  - `HybridToolMatcher` composes embedding + keyword matchers using reciprocal rank fusion (configurable `hybrid_alpha` blend weight).
+  - `OpenAIEmbedder` calls any OpenAI-compatible `/v1/embeddings` endpoint (Ollama, LocalAI, llama.cpp, vLLM, OpenAI).
+  - Catalog vectors cached with FNV fingerprint detection — only re-embedded when the tool catalog changes.
+  - Graceful degradation: if the embedding server is unavailable at startup or fails at runtime, falls back to keyword matching.
+  - New config fields: `embeddings.enabled`, `base_url`, `model`, `api_key`, `similarity_threshold`, `hybrid_alpha`.
+  - New telemetry metrics: `nipper_agent_embedding_requests_total`, `nipper_agent_embedding_duration_seconds`, `nipper_agent_tool_match_duration_seconds`.
+  - `WithToolMatcher` runtime option for pluggable matcher injection.
+
+- **Embedding accuracy test tool** (`cmd/embedding-test`)
+  - CLI tool for validating embedding accuracy against a YAML-defined tool catalog and test suite.
+  - Two modes: batch test suite (CI-friendly, exits 1 on failure) and single query (interactive exploration).
+  - Loads catalog and test cases from YAML files — no recompilation needed to add tools or tests.
+  - Reports cosine similarity scores, expected/missed/false-positive status per test case.
+  - See `docs/EMBEDDING_TEST.md` for usage and examples.
+
 ## [2.0.1] - 2026-03-22
 
 ### Fixed

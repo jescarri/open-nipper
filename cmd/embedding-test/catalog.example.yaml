@@ -1,0 +1,100 @@
+# Tool catalog for embedding accuracy testing.
+#
+# Each entry mirrors what the agent sees at runtime via mcpLoader.ToolInfos().
+# Update this file to match your actual MCP tool catalog.
+#
+# Fields:
+#   name:        exact MCP tool name (must match what the agent binds)
+#   description: tool description (from the MCP server's tool schema)
+#   server_name: originating MCP server (for readability; not used in matching)
+#   tags:        optional semantic tags (appended to the embedding text)
+
+tools:
+  # --- Home Assistant ---
+  - name: HassTurnOn
+    description: "Turns on, opens, or presses a device or entity"
+    server_name: home-assistant
+    tags: [light, switch, plug, fan, device]
+
+  - name: HassTurnOff
+    description: "Turns off or closes a device or entity"
+    server_name: home-assistant
+    tags: [light, switch, plug, fan, device]
+
+  - name: HassLightSet
+    description: "Sets the brightness percentage or color of a light"
+    server_name: home-assistant
+    tags: [light, brightness, color]
+
+  - name: GetLiveContext
+    description: "Gets the current state of all Home Assistant entities and sensors"
+    server_name: home-assistant
+    tags: [sensor, state, moisture, temperature]
+
+  # --- Gmail ---
+  - name: search_gmail_messages
+    description: "Search Gmail messages by query"
+    server_name: google-workspace
+    tags: [email, inbox, gmail]
+
+  - name: get_gmail_messages_content_batch
+    description: "Get the full content of multiple Gmail messages"
+    server_name: google-workspace
+    tags: [email, read]
+
+  - name: get_gmail_unsubscribe_links
+    description: "Find unsubscribe links in recent emails"
+    server_name: google-workspace
+    tags: [email, unsubscribe, spam]
+
+  # --- Google Calendar ---
+  - name: manage_event
+    description: "Create, update, or delete a Google Calendar event"
+    server_name: google-workspace
+    tags: [calendar, appointment, schedule]
+
+  - name: get_events
+    description: "List upcoming Google Calendar events"
+    server_name: google-workspace
+    tags: [calendar, agenda, schedule]
+
+  # --- Joplin ---
+  - name: search_notes
+    description: "Search notes by query string"
+    server_name: joplin
+    tags: [notes, search]
+
+  - name: list_notes
+    description: "List notes in a folder"
+    server_name: joplin
+    tags: [notes, list]
+
+  - name: get_note
+    description: "Get the content of a specific note"
+    server_name: joplin
+    tags: [notes, read]
+
+  - name: get_note_tags
+    description: "Get tags for a specific note"
+    server_name: joplin
+    tags: [notes, tags]
+
+  - name: create_note
+    description: "Create a new note in Joplin"
+    server_name: joplin
+    tags: [notes, create, write]
+
+  - name: create_folder
+    description: "Create a new folder in Joplin"
+    server_name: joplin
+    tags: [notes, folder]
+
+  - name: list_folders
+    description: "List all folders in Joplin"
+    server_name: joplin
+    tags: [notes, folder]
+
+  - name: list_tags
+    description: "List all tags in Joplin"
+    server_name: joplin
+    tags: [notes, tags]

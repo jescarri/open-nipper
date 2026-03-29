@@ -389,7 +389,77 @@ When the user's message matches a keyword, the skill's `mcp_tools` are bound and
 
 ### ToolMatcher interface
 
-The keyword matcher is pluggable via the `ToolMatcher` interface. The current implementation uses keyword overlap scoring. A future `EmbeddingToolMatcher` can use vector similarity for semantic matching without any runtime changes.
+The keyword matcher is pluggable via the `ToolMatcher` interface. The default implementation uses keyword overlap scoring.
+
+### Embedding-based tool matching
+
+When configured, an `EmbeddingToolMatcher` uses cosine similarity against tool description embeddings for **semantic** and **multilingual** matching. A `HybridToolMatcher` composes both approaches using reciprocal rank fusion:
+
+```
+User: "enciende la luz"
+        │
+        ▼
+  1. Keyword matcher: no overlap → 0 matches
+  2. Embedding matcher: "enciende la luz" ≈ "HassTurnOn: Turns on a device" → 0.82
+        │
+        ▼
+  3. Hybrid blends results → binds HassTurnOn + HassLightSet
+```
+
+This works because the embedding model maps "enciende la luz" and "turn on the light" to nearby vectors — enabling cross-language tool discovery without keyword overlap.
+
+#### Configuration
+
+```yaml
+# agent.yaml
+agent:
+  embeddings:
+    enabled: true
+    base_url: "http://localhost:11434/v1"   # Ollama or any OpenAI-compatible endpoint
+    model: "embeddinggemma:300m"             # or nomic-embed-text, text-embedding-3-small
+    # api_key: "${OPENAI_API_KEY}"           # optional, for OpenAI/cloud providers
+    similarity_threshold: 0.3                # minimum cosine similarity to include a tool
+    hybrid_alpha: 0.6                        # blend weight (0=keyword only, 1=embedding only)
+```
+
+Any OpenAI-compatible endpoint works: Ollama, LocalAI, llama.cpp, vLLM, OpenAI. When disabled or unavailable, falls back to keyword matching.
+
+| Model | Dimensions | Provider | Notes |
+|-------|-----------|----------|-------|
+| `embeddinggemma:300m` | 256 | Ollama | Tiny, fast, good multilingual |
+| `nomic-embed-text` | 768 | Ollama | Strong general-purpose |
+| `text-embedding-3-small` | 1536 | OpenAI | Cloud, highest quality |
+
+```bash
+# Pull and serve with Ollama
+ollama pull embeddinggemma:300m
+ollama serve  # exposes /v1/embeddings on :11434
+```
+
+---
+
+### Testing embedding accuracy
+
+The `embedding-test` CLI tool validates embedding accuracy against your tool catalog before deploying:
+
+```bash
+# Batch test suite (CI-friendly — exits 1 on failure)
+go run ./cmd/embedding-test \
+  --base-url http://localhost:11434/v1 \
+  --model embeddinggemma:300m \
+  --catalog cmd/embedding-test/catalog.example.yaml \
+  --tests cmd/embedding-test/tests.example.yaml \
+  --threshold 0.3
+
+# Single query exploration
+go run ./cmd/embedding-test \
+  --base-url http://localhost:11434/v1 \
+  --model embeddinggemma:300m \
+  --catalog cmd/embedding-test/catalog.example.yaml \
+  --query "enciende la luz"
+```
+
+See [docs/EMBEDDING_TEST.md](docs/EMBEDDING_TEST.md) for full usage, file formats, and model comparison tips.
 
 ---
 

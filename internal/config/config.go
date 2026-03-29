@@ -314,12 +314,25 @@ type AgentRuntimeConfig struct {
 	Secrets                SecretsConfig     `yaml:"secrets"    mapstructure:"secrets"`
 	HeartbeatIntervalSeconds int             `yaml:"heartbeat_interval_seconds" mapstructure:"heartbeat_interval_seconds"` // 0 = disabled, default 1
 	Skills                 SkillsConfig     `yaml:"skills"    mapstructure:"skills"`
+	Embeddings             EmbeddingsConfig `yaml:"embeddings" mapstructure:"embeddings"`
 }
 
 // SkillsConfig configures the skills (plugins) loader.
 type SkillsConfig struct {
 	Enabled bool   `yaml:"enabled" mapstructure:"enabled"`
 	Path    string `yaml:"path"    mapstructure:"path"` // override; default: {base_path}/skills
+}
+
+// EmbeddingsConfig configures the embedding-based tool matcher.
+// When enabled, an OpenAI-compatible embedding server is used for semantic
+// tool matching in lean MCP mode.
+type EmbeddingsConfig struct {
+	Enabled             bool    `yaml:"enabled"              mapstructure:"enabled"`
+	BaseURL             string  `yaml:"base_url"             mapstructure:"base_url"`             // e.g. "http://localhost:11434/v1"; empty = OpenAI default
+	Model               string  `yaml:"model"                mapstructure:"model"`                // e.g. "embeddinggemma:300m", "nomic-embed-text"
+	APIKey              string  `yaml:"api_key"              mapstructure:"api_key"`              // optional; supports ${ENV_VAR}
+	SimilarityThreshold float64 `yaml:"similarity_threshold" mapstructure:"similarity_threshold"` // minimum cosine similarity (0–1); default 0.3
+	HybridAlpha         float64 `yaml:"hybrid_alpha"         mapstructure:"hybrid_alpha"`         // blend weight (0 = keyword only, 1 = embedding only); default 0.6
 }
 
 // InferenceConfig configures the LLM backend.

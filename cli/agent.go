@@ -395,6 +395,39 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		)
 	}
 
+	// 14. Embedding-based tool matcher (optional).
+	if cfg.Embeddings.Enabled && cfg.Embeddings.Model != "" {
+		embedder := tools.NewOpenAIEmbedder(cfg.Embeddings.BaseURL, cfg.Embeddings.Model, cfg.Embeddings.APIKey)
+		if err := embedder.Ping(ctx); err != nil {
+			logger.Warn("embedding server unavailable, falling back to keyword matching",
+				zap.String("baseURL", cfg.Embeddings.BaseURL),
+				zap.String("model", cfg.Embeddings.Model),
+				zap.Error(err),
+			)
+		} else {
+			threshold := cfg.Embeddings.SimilarityThreshold
+			if threshold <= 0 {
+				threshold = 0.3
+			}
+			alpha := cfg.Embeddings.HybridAlpha
+			if alpha <= 0 {
+				alpha = 0.6
+			}
+			matcher := &tools.HybridToolMatcher{
+				Primary:  tools.NewEmbeddingToolMatcher(embedder, threshold),
+				Fallback: &tools.KeywordToolMatcher{},
+				Alpha:    alpha,
+			}
+			runtimeOpts = append(runtimeOpts, niagent.WithToolMatcher(matcher))
+			logger.Info("embedding tool matcher enabled",
+				zap.String("baseURL", cfg.Embeddings.BaseURL),
+				zap.String("model", cfg.Embeddings.Model),
+				zap.Float64("threshold", threshold),
+				zap.Float64("alpha", alpha),
+			)
+		}
+	}
+
 	const reconnectBackoff = 5 * time.Second
 	for {
 		reg, err := regClient.Register(ctx)
