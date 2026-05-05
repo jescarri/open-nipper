@@ -205,6 +205,29 @@ func isSpecialTokenLeakage(err error) bool {
 		(strings.Contains(msg, "Failed to parse input") && strings.Contains(msg, "<|"))
 }
 
+// emptyResponseRetryHint returns a corrective system-prompt suffix to inject
+// on a retry after the model produced empty content and no tool calls.
+// Returns the empty string only when reasoning is also empty (nothing to
+// recover from); in all other cases a hint is returned so the caller retries.
+func emptyResponseRetryHint(reasoning string) string {
+	if reasoning == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(reasoning, "<tool_call"),
+		strings.Contains(reasoning, "<function_call"),
+		strings.Contains(reasoning, "<function="):
+		// Model embedded a tool call as plain text instead of using structured
+		// tool_calls — ask it to use the provider's tool_calls field.
+		return "\n\n[CRITICAL: Your previous response emitted a `<tool_call>` (or `<function=...>`) block as plain text in your reasoning instead of as a structured tool call. You MUST use the provider's structured tool_calls field. Do NOT write tool calls inline in your message body or reasoning. Either call the tool via the structured tool_calls field, or reply to the user with plain text — not both, and never as embedded text.]"
+	default:
+		// Model produced extended reasoning/thinking but returned no text and
+		// no tool calls (it "thought" but forgot to act). Ask it to produce an
+		// actual response or call a tool.
+		return "\n\n[IMPORTANT: Your previous turn included reasoning/thinking but returned no response text and no tool calls. You MUST either call a tool using the structured tool_calls field, or reply to the user with a text response. Do NOT return an empty response.]"
+	}
+}
+
 // toolNameFromNotFoundError extracts the tool name from an error like
 // "[NodeRunError] tool summarize_url not found in toolsNode indexes".
 // Returns the empty string if the error does not match that pattern.
@@ -879,6 +902,21 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 				zap.Int("nativeCount", len(r.tools)),
 			)
 		}
+
+		// Always expose search_tools in lean mode so the model can activate
+		// MCP tools that weren't matched up front. The system prompt advertises
+		// "MCP tools (call search_tools to activate)"; binding the tool here
+		// makes that path actually work.
+		if len(mcpCatalog) > 0 {
+			if st, err := tools.BuildSearchToolsTool(mcpCatalog, matcher); err != nil {
+				r.logger.Warn("failed to build search_tools, model will not be able to activate MCP tools on demand",
+					zap.String("sessionKey", msg.SessionKey),
+					zap.Error(err),
+				)
+			} else {
+				agentTools = append([]einotool.BaseTool{st}, agentTools...)
+			}
+		}
 	} else {
 		agentTools = r.currentTools()
 	}
@@ -1033,6 +1071,27 @@ func (r *Runtime) handleMessage(ctx context.Context, msg *models.NipperMessage, 
 				}
 			}
 
+			// Phase-2 lean MCP rebind: if the model called an MCP tool by name
+			// (typically after search_tools resolved it) but that tool wasn't
+			// bound up front, add it to the toolset and retry. This makes the
+			// search_tools → execute-by-name flow actually work.
+			if toolName := toolNameFromNotFoundError(lastErr); toolName != "" && r.mcpLoader != nil {
+				added := r.mcpLoader.ToolsByNames([]string{toolName})
+				if len(added) > 0 {
+					r.logger.Info("lean MCP mode: binding tool requested by model",
+						zap.String("sessionKey", msg.SessionKey),
+						zap.String("tool", toolName),
+						zap.Int("attempt", attempt),
+					)
+					agentTools = append(agentTools, added...)
+					agentCfg.ToolsConfig.Tools = wrapToolsWithDedup(sanitizeToolDescriptions(agentTools))
+					if newAgent, agentErr := react.NewAgent(ctx, agentCfg); agentErr == nil {
+						reactAgent = newAgent
+						continue
+					}
+				}
+			}
+
 			// If the model leaked chat-template special tokens (<|channel|>, <|message|>, etc.)
 			// instead of producing proper tool-call JSON, retry with a recovery hint that
 			// explicitly tells the model to use JSON tool calls. This is common with local
@@ -1095,15 +1154,83 @@ generated:
 	telemetry.SpanOK(genSpan)
 	genSpan.End()
 
+	// Pre-guard cleanup: strip <think> blocks and leaked chat-template tokens
+	// BEFORE the empty-response guard so that a model response consisting only
+	// of a <think> block (e.g. Qwen3 reasoning without a subsequent tool call
+	// or visible text outside the block) is correctly detected as empty.
+	if cleaned, thinking := stripThinkTags(result.Content); thinking != "" {
+		r.logger.Debug("stripped <think> block(s) from response (pre-guard)",
+			zap.String("sessionKey", msg.SessionKey),
+			zap.Int("thinkingLen", len(thinking)),
+		)
+		if result.ReasoningContent == "" {
+			result.ReasoningContent = thinking
+		}
+		result.Content = cleaned
+	}
+	if cleaned := stripChatTemplateTokens(result.Content); cleaned != result.Content {
+		r.logger.Warn("stripped leaked chat-template tokens from response (pre-guard)",
+			zap.String("sessionKey", msg.SessionKey),
+			zap.Int("beforeLen", len(result.Content)),
+			zap.Int("afterLen", len(cleaned)),
+		)
+		result.Content = cleaned
+	}
+
 	// Guard: if the model produced no content and no tool calls (e.g. all tokens
-	// consumed by reasoning), treat it as a soft failure with a user-visible fallback.
+	// consumed by reasoning, or tool calls were emitted as text we couldn't
+	// recover), try one corrective retry before falling back to a user-visible
+	// apology. This catches Qwen3/Hermes-style failures where the model wrote
+	// `<tool_call>...</tool_call>` as plain reasoning text in a shape our
+	// recovery parser didn't match.
 	if strings.TrimSpace(result.Content) == "" && len(result.ToolCalls) == 0 {
 		r.logger.Warn("LLM returned empty response (no content, no tool calls)",
 			zap.String("sessionKey", msg.SessionKey),
 			zap.String("responseId", responseID),
 			zap.String("reasoning", debugTruncate(result.ReasoningContent, 500)),
 		)
-		result.Content = "Sorry, I wasn't able to generate a response. Please try again."
+
+		hint := emptyResponseRetryHint(result.ReasoningContent)
+		if hint != "" {
+			r.logger.Info("retrying once with corrective hint after empty response",
+				zap.String("sessionKey", msg.SessionKey),
+				zap.String("responseId", responseID),
+			)
+			origModifier := agentCfg.MessageModifier
+			agentCfg.MessageModifier = react.NewPersonaModifier(systemPrompt + hint) //nolint:staticcheck // SA1019: deprecated
+			if newAgent, agentErr := react.NewAgent(ctx, agentCfg); agentErr == nil {
+				if retryResult, retryErr := newAgent.Generate(ctx, input, agent.WithComposeOptions(
+					compose.WithCallbacks(agentCallback),
+				)); retryErr == nil {
+					// Normalize the retry result the same way we normalized the
+					// original: strip think blocks so a think-only retry response
+					// is not mistakenly counted as non-empty.
+					if cleaned, thinking := stripThinkTags(retryResult.Content); thinking != "" {
+						if retryResult.ReasoningContent == "" {
+							retryResult.ReasoningContent = thinking
+						}
+						retryResult.Content = cleaned
+					}
+					if cleaned := stripChatTemplateTokens(retryResult.Content); cleaned != retryResult.Content {
+						retryResult.Content = cleaned
+					}
+					if strings.TrimSpace(retryResult.Content) != "" || len(retryResult.ToolCalls) > 0 {
+						result = retryResult
+					}
+				} else {
+					r.logger.Warn("corrective retry failed",
+						zap.String("sessionKey", msg.SessionKey),
+						zap.Error(retryErr),
+					)
+				}
+			}
+			agentCfg.MessageModifier = origModifier
+		}
+
+		// Still empty after retry (or no retry attempted) — show the apology.
+		if strings.TrimSpace(result.Content) == "" && len(result.ToolCalls) == 0 {
+			result.Content = "Sorry, I wasn't able to generate a response. Please try again."
+		}
 	}
 
 	r.logger.Debug("LLM response received",

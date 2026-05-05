@@ -136,6 +136,14 @@ func (s *StreamingGenerateModel) Generate(ctx context.Context, input []*schema.M
 // normalizeToolCalls fixes model output quirks before the message enters the
 // ReAct graph state. Runs once per Generate call at the model-adapter boundary.
 func normalizeToolCalls(msg *schema.Message) {
+	if msg == nil {
+		return
+	}
+	// Recover Hermes/Qwen-style <tool_call>...</tool_call> blocks that the
+	// model emitted as text in Content or ReasoningContent instead of as
+	// structured tool_calls. This is common with Qwen3 and other local models.
+	recoverEmbeddedToolCalls(msg)
+
 	for i := range msg.ToolCalls {
 		// Some models omit arguments for parameterless tools → empty string.
 		// The omitempty tag then drops the "arguments" key entirely, which
@@ -146,9 +154,46 @@ func normalizeToolCalls(msg *schema.Message) {
 	}
 }
 
-// Stream delegates directly to the inner model.
+// Stream calls the inner model's Stream, aggregates the chunks, normalizes
+// the resulting message (including recovering Hermes/Qwen-style <tool_call>
+// blocks emitted as text), and re-emits the normalized message as a single
+// chunk. Buffering the stream is required so the ReAct chunk-based branch
+// checker (which only inspects the first chunk for tool_calls) sees the
+// recovered calls.
 func (s *StreamingGenerateModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	return s.inner.Stream(ctx, input, opts...)
+	reader, err := s.inner.Stream(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	var chunks []*schema.Message
+	for {
+		chunk, recvErr := reader.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			return nil, recvErr
+		}
+		chunks = append(chunks, chunk)
+	}
+
+	out, sw := schema.Pipe[*schema.Message](1)
+	if len(chunks) == 0 {
+		sw.Close()
+		return out, nil
+	}
+
+	msg, err := schema.ConcatMessages(chunks)
+	if err != nil {
+		sw.Close()
+		return nil, err
+	}
+	normalizeToolCalls(msg)
+	sw.Send(msg, nil)
+	sw.Close()
+	return out, nil
 }
 
 // BindTools implements model.ChatModel for backward compatibility.

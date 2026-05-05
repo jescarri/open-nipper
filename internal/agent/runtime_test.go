@@ -309,6 +309,31 @@ func TestIsSpecialTokenLeakage(t *testing.T) {
 	}
 }
 
+func TestEmptyResponseRetryHint(t *testing.T) {
+	tests := []struct {
+		name      string
+		reasoning string
+		wantHint  bool
+	}{
+		{"empty reasoning", "", false},
+		// Non-empty reasoning with no embedded tool-call tags: model thought but
+		// produced no output — retry with a generic hint (this was the bug).
+		{"plain reasoning", "I should respond to the user.", true},
+		{"hermes tool_call tag", "Let me search.\n<tool_call>\n{\"name\":\"x\"}\n</tool_call>", true},
+		{"function_call alias", "<function_call>{\"name\":\"x\"}</function_call>", true},
+		{"qwen xml form", "<function=search_gmail_messages>", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := emptyResponseRetryHint(tt.reasoning)
+			if (got != "") != tt.wantHint {
+				t.Errorf("emptyResponseRetryHint(%q) returned hint=%v (got %q), want hint=%v", tt.reasoning, got != "", got, tt.wantHint)
+			}
+		})
+	}
+}
+
 func TestStripChatTemplateTokens(t *testing.T) {
 	tests := []struct {
 		name  string
